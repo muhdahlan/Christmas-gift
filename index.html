@@ -11,11 +11,21 @@
     <meta property="og:url" content="https://christmas-gift-seven.vercel.app" />
     <meta property="og:type" content="website" />
     
-    <meta property="fc:frame" content="vNext" />
-    <meta property="fc:frame:image" content="https://christmas-gift-seven.vercel.app/og-image.png" />
-    <meta property="fc:frame:button:1" content="Open Gift 🎁" />
-    <meta property="fc:frame:button:1:action" content="link" />
-    <meta property="fc:frame:button:1:target" content="https://christmas-gift-seven.vercel.app" />
+    <meta name="fc:frame" content='{
+      "version": "1",
+      "imageUrl": "https://christmas-gift-seven.vercel.app/og-image.png",
+      "button": {
+        "title": "Open Gift 🎁",
+        "action": {
+          "type": "launch_frame",
+          "name": "Christmas Gift",
+          "url": "https://christmas-gift-seven.vercel.app",
+          "splashImageUrl": "https://christmas-gift-seven.vercel.app/splash.png",
+          "splashBackgroundColor": "#8b0000"
+        }
+      }
+    }' />
+
     <title>Christmas Gift</title>
     <link href="https://fonts.googleapis.com/css2?family=Mountains+of+Christmas:wght@700&family=Poppins:wght@400;600&display=swap" rel="stylesheet">
   </head>
