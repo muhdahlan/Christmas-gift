@@ -10,14 +10,18 @@ function App() {
 
   useEffect(() => {
     const load = async () => {
-      const context = await sdk.context;
-      setContext(context);
-      
-      if (context?.client?.added) {
-        setAdded(true);
+      try {
+        const context = await sdk.context;
+        setContext(context);
+        
+        if (context?.client?.added) {
+          setAdded(true);
+        }
+        
+        sdk.actions.ready();
+      } catch (err) {
+        sdk.actions.ready();
       }
-
-      sdk.actions.ready();
     };
     
     if (sdk && !isSDKLoaded) {
