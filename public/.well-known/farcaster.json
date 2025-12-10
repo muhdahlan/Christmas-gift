@@ -1,0 +1,18 @@
+{
+  "accountAssociation": {
+    "header": "eyJmaWQiOjM2MjEsInR5cGUiOiJjdXN0b2R5Iiwia2V5IjoiMHg0Nzk4Y2Q4YmViZWRiMzQ5MGQ2NmIzMDhkNmI1NGJmNTVjNDkyN2I2In0",
+    "payload": "eyJkb21haW4iOiJjaHJpc3RtYXMtZ2lmdC1zZXZlbi52ZXJjZWwuYXBwIn0",
+    "signature": "MHg5MzQ5MGQ2NmIzMDhkNmI1NGJmNTVjNDkyN2I2..."
+  },
+  "frame": {
+    "version": "1",
+    "name": "Christmas Gift",
+    "iconUrl": "https://christmas-gift-seven.vercel.app/icon.png",
+    "homeUrl": "https://christmas-gift-seven.vercel.app",
+    "imageUrl": "https://christmas-gift-seven.vercel.app/og-image.png",
+    "buttonTitle": "Open Gift 🎁",
+    "splashImageUrl": "https://christmas-gift-seven.vercel.app/splash.png",
+    "splashBackgroundColor": "#8b0000",
+    "webhookUrl": "https://christmas-gift-seven.vercel.app/api/webhook"
+  }
+}
