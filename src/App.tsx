@@ -1,11 +1,22 @@
 import React, { useEffect, useState } from 'react';
 import { Gift, Share2, Check, ExternalLink } from 'lucide-react';
+import sdk from '@farcaster/frame-sdk';
 
 function App() {
   const [snowflakes, setSnowflakes] = useState<number[]>([]);
   const [copied, setCopied] = useState(false);
 
-  // Logic Animasi Salju
+  useEffect(() => {
+    const init = async () => {
+      try {
+        await sdk.actions.ready();
+      } catch (err) {
+        console.error(err);
+      }
+    };
+    init();
+  }, []);
+
   useEffect(() => {
     const interval = setInterval(() => {
       setSnowflakes(prev => {
@@ -16,7 +27,6 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // Logic 1: Share Biasa / Copy Link
   const handleShare = async () => {
     const shareData = {
       title: 'Christmas Gift Surprise',
@@ -28,7 +38,7 @@ function App() {
       try {
         await navigator.share(shareData);
       } catch (err) {
-        console.log('Error sharing:', err);
+        console.log(err);
       }
     } else {
       try {
@@ -41,7 +51,6 @@ function App() {
     }
   };
 
-  // Logic 2: Share ke Warpcast (Frame Style)
   const handleWarpcastShare = () => {
     const text = encodeURIComponent("I just checked my Christmas gift status! Are you on the naughty or nice list? 👇 🎄");
     const embedUrl = encodeURIComponent(window.location.href); 
@@ -52,7 +61,6 @@ function App() {
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-red-900 via-red-800 to-red-950 flex items-center justify-center overflow-hidden relative font-['Poppins'] text-white">
       
-      {/* Render Salju */}
       {snowflakes.map((flake) => (
         <div
           key={flake}
@@ -76,7 +84,6 @@ function App() {
         }
       `}</style>
 
-      {/* Kartu Utama */}
       <div className="relative z-10 mx-4">
         <div className="bg-white/10 backdrop-blur-lg border border-white/20 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center transform transition-all duration-300 hover:scale-[1.02]">
           
@@ -98,10 +105,8 @@ function App() {
             </p>
           </div>
 
-          {/* Tombol-tombol Share */}
           <div className="flex flex-col gap-3">
             
-            {/* Tombol Warpcast (Ungu) */}
             <button 
               onClick={handleWarpcastShare}
               className="w-full group flex items-center justify-center gap-2 bg-[#855DCD] hover:bg-[#7c54c2] text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02]"
@@ -110,7 +115,6 @@ function App() {
               <span>Share on Warpcast</span>
             </button>
 
-            {/* Tombol Copy/Share Biasa (Transparan) */}
             <button 
               onClick={handleShare}
               className="w-full group flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200"
