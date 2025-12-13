@@ -1,7 +1,7 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Gift, ExternalLink, Plus, Coins, Lock, Wallet, Loader2 } from 'lucide-react';
+import { Gift, ExternalLink, Plus, Coins, Lock, Loader2, Zap } from 'lucide-react';
 import sdk, { type Context } from '@farcaster/frame-sdk';
-import { createWalletClient, custom, createPublicClient, http, parseEther } from 'viem';
+import { createWalletClient, custom, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
 const CONTRACT_ADDRESS = "0x6cb0bfd9870d56cbfc833f7aa0df2a0f93db0f56";
@@ -30,10 +30,20 @@ function App() {
   const [added, setAdded] = useState(false);
   
   const [address, setAddress] = useState<string | null>(null);
-  const [isConnecting, setIsConnecting] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
   const [nextClaimIn, setNextClaimIn] = useState<number>(0);
   const [txHash, setTxHash] = useState<string | null>(null);
+  const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  const getProvider = () => {
+    if ((sdk as any).wallet?.ethProvider) {
+      return (sdk as any).wallet.ethProvider;
+    }
+    if (typeof window !== 'undefined' && (window as any).ethereum) {
+      return (window as any).ethereum;
+    }
+    return null;
+  };
 
   const checkContractStatus = useCallback(async (userAddress: string) => {
     try {
@@ -50,7 +60,6 @@ function App() {
       }) as bigint;
 
       setNextClaimIn(Number(result));
-
     } catch (error) {
       console.error("Error reading contract:", error);
     }
@@ -66,15 +75,22 @@ function App() {
           setAdded(true);
         }
 
-        if (window.ethereum) {
-          const client = createWalletClient({
-            chain: base,
-            transport: custom(window.ethereum)
-          });
-          const [connectedAddress] = await client.getAddresses();
-          if (connectedAddress) {
-            setAddress(connectedAddress);
-            checkContractStatus(connectedAddress);
+        const provider = getProvider();
+        if (provider) {
+          try {
+            const client = createWalletClient({
+              chain: base,
+              transport: custom(provider)
+            });
+            
+            const [connectedAddress] = await client.requestAddresses();
+            
+            if (connectedAddress) {
+              setAddress(connectedAddress);
+              checkContractStatus(connectedAddress);
+            }
+          } catch (e) {
+            console.log("Auto-connect info: User needs to click connect manually first time");
           }
         }
         
@@ -91,46 +107,42 @@ function App() {
   }, [isSDKLoaded, checkContractStatus]);
 
   const handleConnect = async () => {
-    if (!window.ethereum) {
-      alert("No wallet found. Please open in a crypto-enabled browser or Warpcast.");
+    setErrorMsg(null);
+    const provider = getProvider();
+
+    if (!provider) {
+      setErrorMsg("Wallet not found. Open in Warpcast Mobile.");
       return;
     }
 
-    setIsConnecting(true);
     try {
       const client = createWalletClient({
         chain: base,
-        transport: custom(window.ethereum)
+        transport: custom(provider)
       });
 
       const [connectedAddress] = await client.requestAddresses();
       setAddress(connectedAddress);
-      
       await checkContractStatus(connectedAddress);
-
-      try {
-        await client.switchChain({ id: base.id });
-      } catch (e) {
-        console.log("Chain switch ignored or failed", e);
-      }
-
-    } catch (error) {
+      
+    } catch (error: any) {
       console.error("Connection failed:", error);
-    } finally {
-      setIsConnecting(false);
+      setErrorMsg("Connection failed. Please retry.");
     }
   };
 
   const handleClaim = async () => {
     if (!address) return;
-
     setIsClaiming(true);
     setTxHash(null);
+    setErrorMsg(null);
 
+    const provider = getProvider();
+    
     try {
       const client = createWalletClient({
         chain: base,
-        transport: custom(window.ethereum!)
+        transport: custom(provider)
       });
 
       const { request } = await createPublicClient({
@@ -146,23 +158,20 @@ function App() {
       const hash = await client.writeContract(request);
       setTxHash(hash);
 
-      alert("Transaction Sent! Waiting for confirmation...");
-
       const publicClient = createPublicClient({ chain: base, transport: http() });
       await publicClient.waitForTransactionReceipt({ hash });
-
-      alert("Success! 10 DEGEN sent to your wallet.");
       
       checkContractStatus(address);
+      alert("Success! 10 DEGEN claimed.");
 
     } catch (error: any) {
       console.error("Claim failed:", error);
-      if (error.message.includes("Cooldown active")) {
-        alert("Cooldown is still active! Please wait.");
-      } else if (error.message.includes("Insufficient balance")) {
-        alert("Santa is out of gifts! (Contract Empty)");
+      if (error.message.includes("Cooldown")) {
+        setErrorMsg("Cooldown active! Please wait.");
+      } else if (error.message.includes("Insufficient")) {
+        setErrorMsg("Santa is out of gifts (Contract Empty).");
       } else {
-        alert("Claim failed. Make sure you have small ETH (Base) for gas.");
+        setErrorMsg("Claim failed. Ensure you have ETH on Base.");
       }
     } finally {
       setIsClaiming(false);
@@ -170,22 +179,16 @@ function App() {
   };
 
   const handleWarpcastShare = useCallback(() => {
-    // UPDATED TEXT HERE
     const text = encodeURIComponent(`I just claimed 10 $DEGEN! 🎁\n\nClaim yours daily here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
-    
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
 
   const handleAddApp = useCallback(async () => {
     try {
       const result = await sdk.actions.addFrame();
-      if (result.notificationDetails) {
-        setAdded(true);
-      }
-    } catch (error) {
-      console.error(error);
-    }
+      if (result.notificationDetails) setAdded(true);
+    } catch (error) { console.error(error); }
   }, []);
 
   useEffect(() => {
@@ -227,6 +230,12 @@ function App() {
             {context?.user?.username ? `Hi @${context.user.username}!` : ''}
           </p>
 
+          {errorMsg && (
+            <div className="mb-4 p-2 bg-red-500/50 rounded-lg text-sm text-white font-medium animate-pulse">
+              {errorMsg}
+            </div>
+          )}
+
           <div className="border-t border-white/20 pt-6 mt-4 mb-8">
             <p className="text-yellow-200 font-medium text-lg leading-relaxed">
               Connect wallet and claim your REAL DEGEN tokens (Base).
@@ -238,11 +247,10 @@ function App() {
             {!address ? (
               <button 
                 onClick={handleConnect}
-                disabled={isConnecting}
                 className="w-full group flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200"
               >
-                {isConnecting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wallet className="w-5 h-5" />}
-                <span>Connect Wallet</span>
+                <Zap className="w-5 h-5" />
+                <span>Connect Farcaster Wallet</span>
               </button>
             ) : nextClaimIn > 0 ? (
                <button 
@@ -259,7 +267,7 @@ function App() {
                 className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02] animate-pulse"
               >
                 {isClaiming ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}
-                <span>Claim 10 DEGEN (On-Chain)</span>
+                <span>Claim 10 DEGEN</span>
               </button>
             )}
 
