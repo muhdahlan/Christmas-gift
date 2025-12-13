@@ -4,10 +4,8 @@ import sdk, { type Context } from '@farcaster/frame-sdk';
 import { createWalletClient, custom, createPublicClient, http, parseEther } from 'viem';
 import { base } from 'viem/chains';
 
-// --- CONFIGURATION ---
 const CONTRACT_ADDRESS = "0x6cb0bfd9870d56cbfc833f7aa0df2a0f93db0f56";
 
-// ABI extracted from your Solidity code (Only needed functions)
 const ABI = [
   {
     "inputs": [],
@@ -31,14 +29,12 @@ function App() {
   const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   const [added, setAdded] = useState(false);
   
-  // Wallet & Contract States
   const [address, setAddress] = useState<string | null>(null);
   const [isConnecting, setIsConnecting] = useState(false);
   const [isClaiming, setIsClaiming] = useState(false);
-  const [nextClaimIn, setNextClaimIn] = useState<number>(0); // 0 means ready to claim
+  const [nextClaimIn, setNextClaimIn] = useState<number>(0);
   const [txHash, setTxHash] = useState<string | null>(null);
 
-  // --- 1. SETUP & CHECK CLAIM STATUS ---
   const checkContractStatus = useCallback(async (userAddress: string) => {
     try {
       const publicClient = createPublicClient({
@@ -46,7 +42,6 @@ function App() {
         transport: http()
       });
 
-      // Call getNextClaim from your contract
       const result = await publicClient.readContract({
         address: CONTRACT_ADDRESS,
         abi: ABI,
@@ -54,7 +49,6 @@ function App() {
         args: [userAddress]
       }) as bigint;
 
-      // Result is seconds remaining. Convert to number.
       setNextClaimIn(Number(result));
 
     } catch (error) {
@@ -72,7 +66,6 @@ function App() {
           setAdded(true);
         }
 
-        // Try to detect if wallet is already connected
         if (window.ethereum) {
           const client = createWalletClient({
             chain: base,
@@ -97,7 +90,6 @@ function App() {
     }
   }, [isSDKLoaded, checkContractStatus]);
 
-  // --- 2. WALLET CONNECTION ---
   const handleConnect = async () => {
     if (!window.ethereum) {
       alert("No wallet found. Please open in a crypto-enabled browser or Warpcast.");
@@ -111,14 +103,11 @@ function App() {
         transport: custom(window.ethereum)
       });
 
-      // Request accounts
       const [connectedAddress] = await client.requestAddresses();
       setAddress(connectedAddress);
       
-      // Check cooldown immediately after connect
       await checkContractStatus(connectedAddress);
 
-      // Switch chain to Base if needed
       try {
         await client.switchChain({ id: base.id });
       } catch (e) {
@@ -132,7 +121,6 @@ function App() {
     }
   };
 
-  // --- 3. CLAIM FUNCTION (REAL TRANSACTION) ---
   const handleClaim = async () => {
     if (!address) return;
 
@@ -145,7 +133,6 @@ function App() {
         transport: custom(window.ethereum!)
       });
 
-      // 1. Prepare Transaction
       const { request } = await createPublicClient({
         chain: base,
         transport: http()
@@ -156,24 +143,20 @@ function App() {
         functionName: 'claim',
       });
 
-      // 2. Execute Transaction
       const hash = await client.writeContract(request);
       setTxHash(hash);
 
       alert("Transaction Sent! Waiting for confirmation...");
 
-      // 3. Wait for Receipt (Optional, but good UX)
       const publicClient = createPublicClient({ chain: base, transport: http() });
       await publicClient.waitForTransactionReceipt({ hash });
 
       alert("Success! 10 DEGEN sent to your wallet.");
       
-      // Update cooldown status
       checkContractStatus(address);
 
     } catch (error: any) {
       console.error("Claim failed:", error);
-      // Handle specific errors from your contract
       if (error.message.includes("Cooldown active")) {
         alert("Cooldown is still active! Please wait.");
       } else if (error.message.includes("Insufficient balance")) {
@@ -186,14 +169,13 @@ function App() {
     }
   };
 
-  // --- 4. SHARE ---
   const handleWarpcastShare = useCallback(() => {
-    const userName = context?.user?.username || "friend";
-    const text = encodeURIComponent(`I just claimed real $DEGEN on Base! 🎁\n\nAre you on the Naughty List like @${userName}? Check yours here 👇`);
+    // UPDATED TEXT HERE
+    const text = encodeURIComponent(`I just claimed 10 $DEGEN! 🎁\n\nClaim yours daily here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
-  }, [context]);
+  }, []);
 
   const handleAddApp = useCallback(async () => {
     try {
@@ -206,7 +188,6 @@ function App() {
     }
   }, []);
 
-  // --- ANIMATION ---
   useEffect(() => {
     const interval = setInterval(() => {
       setSnowflakes(prev => {
@@ -217,7 +198,6 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
-  // --- RENDER HELPERS ---
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
@@ -255,7 +235,6 @@ function App() {
 
           <div className="flex flex-col gap-3">
             
-            {/* LOGIC BUTTON: Connect -> Claim -> Cooldown */}
             {!address ? (
               <button 
                 onClick={handleConnect}
@@ -284,7 +263,6 @@ function App() {
               </button>
             )}
 
-            {/* View on Explorer (Shows after TX) */}
             {txHash && (
                <a 
                 href={`https://basescan.org/tx/${txHash}`}
