@@ -1,12 +1,44 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Gift, ExternalLink, Plus } from 'lucide-react';
-import sdk from '@farcaster/frame-sdk';
+import { Gift, ExternalLink, Plus, Coins, Lock } from 'lucide-react';
+import sdk, { type Context } from '@farcaster/frame-sdk';
 
 function App() {
   const [snowflakes, setSnowflakes] = useState<number[]>([]);
   const [context, setContext] = useState<any>(); 
   const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   const [added, setAdded] = useState(false);
+  
+  const [hasShared, setHasShared] = useState(false);
+  const [claimedToday, setClaimedToday] = useState(false);
+  const [balance, setBalance] = useState(0);
+
+  const checkClaimStatus = () => {
+    const lastClaimStr = localStorage.getItem('lastClaimTime');
+    const storedBalance = localStorage.getItem('degenBalance');
+    
+    if (storedBalance) setBalance(parseInt(storedBalance));
+
+    if (!lastClaimStr) {
+      setClaimedToday(false);
+      return;
+    }
+
+    const lastClaim = new Date(lastClaimStr);
+    const now = new Date();
+    
+    const resetTimeToday = new Date();
+    resetTimeToday.setHours(8, 0, 0, 0);
+
+    if (now < resetTimeToday) {
+      resetTimeToday.setDate(resetTimeToday.getDate() - 1);
+    }
+
+    if (lastClaim > resetTimeToday) {
+      setClaimedToday(true);
+    } else {
+      setClaimedToday(false);
+    }
+  };
 
   useEffect(() => {
     const load = async () => {
@@ -18,6 +50,7 @@ function App() {
           setAdded(true);
         }
         
+        checkClaimStatus();
         sdk.actions.ready();
       } catch (err) {
         sdk.actions.ready();
@@ -43,7 +76,6 @@ function App() {
   const handleAddApp = useCallback(async () => {
     try {
       const result = await sdk.actions.addFrame();
-      
       if (result.notificationDetails) {
         setAdded(true);
       }
@@ -54,10 +86,25 @@ function App() {
 
   const handleWarpcastShare = useCallback(() => {
     const userName = context?.user?.username || "friend";
-    const text = encodeURIComponent(`I just checked my Christmas gift! 🎄\n\nAre you on the Naughty List like @${userName}? Check yours here 👇`);
+    const text = encodeURIComponent(`Daily DEGEN Gift! 🎁\n\nClaim yours daily like @${userName}! 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
+    
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
+    
+    setHasShared(true);
   }, [context]);
+
+  const handleClaim = () => {
+    const now = new Date();
+    localStorage.setItem('lastClaimTime', now.toISOString());
+    
+    const newBalance = balance + 10;
+    setBalance(newBalance);
+    localStorage.setItem('degenBalance', newBalance.toString());
+
+    setClaimedToday(true);
+    alert(`Success! You claimed 10 DEGEN points. Come back tomorrow after 08:00 AM!`);
+  };
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-red-900 via-red-800 to-red-950 flex items-center justify-center overflow-hidden relative font-['Poppins'] text-white">
@@ -79,21 +126,52 @@ function App() {
           </h1>
 
           <p className="text-xl font-semibold mb-6 tracking-wide">
-            {context?.user?.username ? `Hi @${context.user.username},` : ''} <br/>
-            There are no gifts here.
+            {context?.user?.username ? `Hi @${context.user.username}!` : ''}
           </p>
 
+          <div className="bg-black/30 rounded-lg p-2 mb-6 inline-flex items-center gap-2 px-4 mx-auto">
+            <Coins className="w-4 h-4 text-yellow-400" />
+            <span className="font-mono text-yellow-400 font-bold">{balance} DEGEN (Points)</span>
+          </div>
+
           <div className="border-t border-white/20 pt-6 mt-4 mb-8">
-            <p className="text-red-200 italic font-medium text-lg leading-relaxed">
-              "Get a job and stop being lazy retard."
+            <p className="text-yellow-200 font-medium text-lg leading-relaxed">
+              Share this and claim your DEGEN coins every day.
             </p>
           </div>
 
           <div className="flex flex-col gap-3">
             
+            <button 
+              onClick={handleClaim}
+              disabled={!hasShared || claimedToday}
+              className={`w-full group flex items-center justify-center gap-2 py-3 px-6 rounded-xl shadow-lg transition-all duration-200 font-bold
+                ${(!hasShared || claimedToday) 
+                  ? 'bg-gray-600 text-gray-300 cursor-not-allowed' 
+                  : 'bg-green-600 hover:bg-green-500 text-white transform hover:scale-[1.02] animate-pulse'}
+              `}
+            >
+              {claimedToday ? (
+                <>
+                  <Lock className="w-5 h-5" />
+                  <span>Next Claim: Tomorrow 08:00</span>
+                </>
+              ) : !hasShared ? (
+                <>
+                  <Lock className="w-5 h-5" />
+                  <span>Share to Unlock Claim</span>
+                </>
+              ) : (
+                <>
+                  <Coins className="w-5 h-5" />
+                  <span>Claim 10 DEGEN</span>
+                </>
+              )}
+            </button>
+
             <button onClick={handleWarpcastShare} className="w-full group flex items-center justify-center gap-2 bg-[#855DCD] hover:bg-[#7c54c2] text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200">
               <ExternalLink className="w-5 h-5" />
-              <span>Share Prank</span>
+              <span>Share</span>
             </button>
 
             {!added && (
