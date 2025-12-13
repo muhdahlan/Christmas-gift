@@ -1,6 +1,29 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Gift, ExternalLink, Plus, Coins, Lock } from 'lucide-react';
+import { Gift, ExternalLink, Plus, Coins, Lock, Wallet, Loader2 } from 'lucide-react';
 import sdk, { type Context } from '@farcaster/frame-sdk';
+import { createWalletClient, custom, createPublicClient, http, parseEther } from 'viem';
+import { base } from 'viem/chains';
+
+// --- CONFIGURATION ---
+const CONTRACT_ADDRESS = "0x6cb0bfd9870d56cbfc833f7aa0df2a0f93db0f56";
+
+// ABI extracted from your Solidity code (Only needed functions)
+const ABI = [
+  {
+    "inputs": [],
+    "name": "claim",
+    "outputs": [],
+    "stateMutability": "nonpayable",
+    "type": "function"
+  },
+  {
+    "inputs": [{ "internalType": "address", "name": "_user", "type": "address" }],
+    "name": "getNextClaim",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+  }
+];
 
 function App() {
   const [snowflakes, setSnowflakes] = useState<number[]>([]);
@@ -8,37 +31,36 @@ function App() {
   const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   const [added, setAdded] = useState(false);
   
-  const [hasShared, setHasShared] = useState(false);
-  const [claimedToday, setClaimedToday] = useState(false);
-  const [balance, setBalance] = useState(0);
+  // Wallet & Contract States
+  const [address, setAddress] = useState<string | null>(null);
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [isClaiming, setIsClaiming] = useState(false);
+  const [nextClaimIn, setNextClaimIn] = useState<number>(0); // 0 means ready to claim
+  const [txHash, setTxHash] = useState<string | null>(null);
 
-  const checkClaimStatus = () => {
-    const lastClaimStr = localStorage.getItem('lastClaimTime');
-    const storedBalance = localStorage.getItem('degenBalance');
-    
-    if (storedBalance) setBalance(parseInt(storedBalance));
+  // --- 1. SETUP & CHECK CLAIM STATUS ---
+  const checkContractStatus = useCallback(async (userAddress: string) => {
+    try {
+      const publicClient = createPublicClient({
+        chain: base,
+        transport: http()
+      });
 
-    if (!lastClaimStr) {
-      setClaimedToday(false);
-      return;
+      // Call getNextClaim from your contract
+      const result = await publicClient.readContract({
+        address: CONTRACT_ADDRESS,
+        abi: ABI,
+        functionName: 'getNextClaim',
+        args: [userAddress]
+      }) as bigint;
+
+      // Result is seconds remaining. Convert to number.
+      setNextClaimIn(Number(result));
+
+    } catch (error) {
+      console.error("Error reading contract:", error);
     }
-
-    const lastClaim = new Date(lastClaimStr);
-    const now = new Date();
-    
-    const resetTimeToday = new Date();
-    resetTimeToday.setHours(8, 0, 0, 0);
-
-    if (now < resetTimeToday) {
-      resetTimeToday.setDate(resetTimeToday.getDate() - 1);
-    }
-
-    if (lastClaim > resetTimeToday) {
-      setClaimedToday(true);
-    } else {
-      setClaimedToday(false);
-    }
-  };
+  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -49,8 +71,20 @@ function App() {
         if (context?.client?.added) {
           setAdded(true);
         }
+
+        // Try to detect if wallet is already connected
+        if (window.ethereum) {
+          const client = createWalletClient({
+            chain: base,
+            transport: custom(window.ethereum)
+          });
+          const [connectedAddress] = await client.getAddresses();
+          if (connectedAddress) {
+            setAddress(connectedAddress);
+            checkContractStatus(connectedAddress);
+          }
+        }
         
-        checkClaimStatus();
         sdk.actions.ready();
       } catch (err) {
         sdk.actions.ready();
@@ -61,17 +95,105 @@ function App() {
       setIsSDKLoaded(true);
       load();
     }
-  }, [isSDKLoaded]);
+  }, [isSDKLoaded, checkContractStatus]);
 
-  useEffect(() => {
-    const interval = setInterval(() => {
-      setSnowflakes(prev => {
-        const cleanup = prev.length > 50 ? prev.slice(1) : prev;
-        return [...cleanup, Date.now()];
+  // --- 2. WALLET CONNECTION ---
+  const handleConnect = async () => {
+    if (!window.ethereum) {
+      alert("No wallet found. Please open in a crypto-enabled browser or Warpcast.");
+      return;
+    }
+
+    setIsConnecting(true);
+    try {
+      const client = createWalletClient({
+        chain: base,
+        transport: custom(window.ethereum)
       });
-    }, 200);
-    return () => clearInterval(interval);
-  }, []);
+
+      // Request accounts
+      const [connectedAddress] = await client.requestAddresses();
+      setAddress(connectedAddress);
+      
+      // Check cooldown immediately after connect
+      await checkContractStatus(connectedAddress);
+
+      // Switch chain to Base if needed
+      try {
+        await client.switchChain({ id: base.id });
+      } catch (e) {
+        console.log("Chain switch ignored or failed", e);
+      }
+
+    } catch (error) {
+      console.error("Connection failed:", error);
+    } finally {
+      setIsConnecting(false);
+    }
+  };
+
+  // --- 3. CLAIM FUNCTION (REAL TRANSACTION) ---
+  const handleClaim = async () => {
+    if (!address) return;
+
+    setIsClaiming(true);
+    setTxHash(null);
+
+    try {
+      const client = createWalletClient({
+        chain: base,
+        transport: custom(window.ethereum!)
+      });
+
+      // 1. Prepare Transaction
+      const { request } = await createPublicClient({
+        chain: base,
+        transport: http()
+      }).simulateContract({
+        account: address as `0x${string}`,
+        address: CONTRACT_ADDRESS,
+        abi: ABI,
+        functionName: 'claim',
+      });
+
+      // 2. Execute Transaction
+      const hash = await client.writeContract(request);
+      setTxHash(hash);
+
+      alert("Transaction Sent! Waiting for confirmation...");
+
+      // 3. Wait for Receipt (Optional, but good UX)
+      const publicClient = createPublicClient({ chain: base, transport: http() });
+      await publicClient.waitForTransactionReceipt({ hash });
+
+      alert("Success! 10 DEGEN sent to your wallet.");
+      
+      // Update cooldown status
+      checkContractStatus(address);
+
+    } catch (error: any) {
+      console.error("Claim failed:", error);
+      // Handle specific errors from your contract
+      if (error.message.includes("Cooldown active")) {
+        alert("Cooldown is still active! Please wait.");
+      } else if (error.message.includes("Insufficient balance")) {
+        alert("Santa is out of gifts! (Contract Empty)");
+      } else {
+        alert("Claim failed. Make sure you have small ETH (Base) for gas.");
+      }
+    } finally {
+      setIsClaiming(false);
+    }
+  };
+
+  // --- 4. SHARE ---
+  const handleWarpcastShare = useCallback(() => {
+    const userName = context?.user?.username || "friend";
+    const text = encodeURIComponent(`I just claimed real $DEGEN on Base! 🎁\n\nAre you on the Naughty List like @${userName}? Check yours here 👇`);
+    const embedUrl = encodeURIComponent(window.location.href); 
+    
+    sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
+  }, [context]);
 
   const handleAddApp = useCallback(async () => {
     try {
@@ -84,26 +206,22 @@ function App() {
     }
   }, []);
 
-  const handleWarpcastShare = useCallback(() => {
-    const userName = context?.user?.username || "friend";
-    const text = encodeURIComponent(`Daily DEGEN Gift! 🎁\n\nClaim yours daily like @${userName}! 👇`);
-    const embedUrl = encodeURIComponent(window.location.href); 
-    
-    sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
-    
-    setHasShared(true);
-  }, [context]);
+  // --- ANIMATION ---
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setSnowflakes(prev => {
+        const cleanup = prev.length > 50 ? prev.slice(1) : prev;
+        return [...cleanup, Date.now()];
+      });
+    }, 200);
+    return () => clearInterval(interval);
+  }, []);
 
-  const handleClaim = () => {
-    const now = new Date();
-    localStorage.setItem('lastClaimTime', now.toISOString());
-    
-    const newBalance = balance + 10;
-    setBalance(newBalance);
-    localStorage.setItem('degenBalance', newBalance.toString());
-
-    setClaimedToday(true);
-    alert(`Success! You claimed 10 DEGEN points. Come back tomorrow after 08:00 AM!`);
+  // --- RENDER HELPERS ---
+  const formatTime = (seconds: number) => {
+    const h = Math.floor(seconds / 3600);
+    const m = Math.floor((seconds % 3600) / 60);
+    return `${h}h ${m}m`;
   };
 
   return (
@@ -129,45 +247,54 @@ function App() {
             {context?.user?.username ? `Hi @${context.user.username}!` : ''}
           </p>
 
-          <div className="bg-black/30 rounded-lg p-2 mb-6 inline-flex items-center gap-2 px-4 mx-auto">
-            <Coins className="w-4 h-4 text-yellow-400" />
-            <span className="font-mono text-yellow-400 font-bold">{balance} DEGEN (Points)</span>
-          </div>
-
           <div className="border-t border-white/20 pt-6 mt-4 mb-8">
             <p className="text-yellow-200 font-medium text-lg leading-relaxed">
-              Share this and claim your DEGEN coins every day.
+              Connect wallet and claim your REAL DEGEN tokens (Base).
             </p>
           </div>
 
           <div className="flex flex-col gap-3">
             
-            <button 
-              onClick={handleClaim}
-              disabled={!hasShared || claimedToday}
-              className={`w-full group flex items-center justify-center gap-2 py-3 px-6 rounded-xl shadow-lg transition-all duration-200 font-bold
-                ${(!hasShared || claimedToday) 
-                  ? 'bg-gray-600 text-gray-300 cursor-not-allowed' 
-                  : 'bg-green-600 hover:bg-green-500 text-white transform hover:scale-[1.02] animate-pulse'}
-              `}
-            >
-              {claimedToday ? (
-                <>
-                  <Lock className="w-5 h-5" />
-                  <span>Next Claim: Tomorrow 08:00</span>
-                </>
-              ) : !hasShared ? (
-                <>
-                  <Lock className="w-5 h-5" />
-                  <span>Share to Unlock Claim</span>
-                </>
-              ) : (
-                <>
-                  <Coins className="w-5 h-5" />
-                  <span>Claim 10 DEGEN</span>
-                </>
-              )}
-            </button>
+            {/* LOGIC BUTTON: Connect -> Claim -> Cooldown */}
+            {!address ? (
+              <button 
+                onClick={handleConnect}
+                disabled={isConnecting}
+                className="w-full group flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200"
+              >
+                {isConnecting ? <Loader2 className="w-5 h-5 animate-spin" /> : <Wallet className="w-5 h-5" />}
+                <span>Connect Wallet</span>
+              </button>
+            ) : nextClaimIn > 0 ? (
+               <button 
+                disabled
+                className="w-full group flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-lg cursor-not-allowed"
+              >
+                <Lock className="w-5 h-5" />
+                <span>Next Claim: {formatTime(nextClaimIn)}</span>
+              </button>
+            ) : (
+              <button 
+                onClick={handleClaim}
+                disabled={isClaiming}
+                className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02] animate-pulse"
+              >
+                {isClaiming ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}
+                <span>Claim 10 DEGEN (On-Chain)</span>
+              </button>
+            )}
+
+            {/* View on Explorer (Shows after TX) */}
+            {txHash && (
+               <a 
+                href={`https://basescan.org/tx/${txHash}`}
+                target="_blank"
+                rel="noreferrer"
+                className="text-xs text-blue-300 underline mb-2"
+              >
+                View Transaction on Basescan
+              </a>
+            )}
 
             <button onClick={handleWarpcastShare} className="w-full group flex items-center justify-center gap-2 bg-[#855DCD] hover:bg-[#7c54c2] text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200">
               <ExternalLink className="w-5 h-5" />
