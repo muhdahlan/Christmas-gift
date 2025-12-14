@@ -4,7 +4,7 @@ import sdk, { type Context } from '@farcaster/frame-sdk';
 import { createWalletClient, custom, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
-const CONTRACT_ADDRESS = "0x6cb0bfd9870d56cbfc833f7aa0df2a0f93db0f56";
+const CONTRACT_ADDRESS = "0x4595b08d4694268333a8946ff7fd18d9a98d31f9";
 
 const ABI = [
   {
@@ -15,9 +15,9 @@ const ABI = [
     "type": "function"
   },
   {
-    "inputs": [{ "internalType": "address", "name": "_user", "type": "address" }],
-    "name": "getNextClaim",
-    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "inputs": [{ "internalType": "address", "name": "user", "type": "address" }],
+    "name": "canClaim",
+    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
     "stateMutability": "view",
     "type": "function"
   }
@@ -31,35 +31,37 @@ function App() {
   
   const [address, setAddress] = useState<string | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
-  const [nextClaimIn, setNextClaimIn] = useState<number>(0);
+  const [canClaimNow, setCanClaimNow] = useState(false);
+  const [timeUntilReset, setTimeUntilReset] = useState<number>(0);
+  
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
   const getProvider = () => {
-    if ((sdk as any).wallet?.ethProvider) {
-      return (sdk as any).wallet.ethProvider;
-    }
-    if (typeof window !== 'undefined' && (window as any).ethereum) {
-      return (window as any).ethereum;
-    }
+    if ((sdk as any).wallet?.ethProvider) return (sdk as any).wallet.ethProvider;
+    if (typeof window !== 'undefined' && (window as any).ethereum) return (window as any).ethereum;
     return null;
+  };
+
+  const calculateTimeUntilReset = () => {
+    const now = new Date();
+    const nextReset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
+    const diffSeconds = Math.floor((nextReset.getTime() - now.getTime()) / 1000);
+    return diffSeconds > 0 ? diffSeconds : 0;
   };
 
   const checkContractStatus = useCallback(async (userAddress: string) => {
     try {
-      const publicClient = createPublicClient({
-        chain: base,
-        transport: http()
-      });
-
+      const publicClient = createPublicClient({ chain: base, transport: http() });
       const result = await publicClient.readContract({
         address: CONTRACT_ADDRESS,
         abi: ABI,
-        functionName: 'getNextClaim',
+        functionName: 'canClaim',
         args: [userAddress]
-      }) as bigint;
-
-      setNextClaimIn(Number(result));
+      }) as boolean;
+      
+      setCanClaimNow(result);
+      if (!result) setTimeUntilReset(calculateTimeUntilReset());
     } catch (error) {
       console.error("Error reading contract:", error);
     }
@@ -70,85 +72,47 @@ function App() {
       try {
         const context = await sdk.context;
         setContext(context);
-        
-        if (context?.client?.added) {
-          setAdded(true);
-        }
+        if (context?.client?.added) setAdded(true);
 
         const provider = getProvider();
         if (provider) {
           try {
-            const client = createWalletClient({
-              chain: base,
-              transport: custom(provider)
-            });
-            
+            const client = createWalletClient({ chain: base, transport: custom(provider) });
             const [connectedAddress] = await client.requestAddresses();
-            
             if (connectedAddress) {
               setAddress(connectedAddress);
               checkContractStatus(connectedAddress);
             }
           } catch (e) {
-            console.log("Auto-connect info: User needs to click connect manually first time");
+            console.log("Auto-connect info: Manual connect needed");
           }
         }
-        
         sdk.actions.ready();
-      } catch (err) {
-        sdk.actions.ready();
-      }
+      } catch (err) { sdk.actions.ready(); }
     };
-    
-    if (sdk && !isSDKLoaded) {
-      setIsSDKLoaded(true);
-      load();
-    }
+    if (sdk && !isSDKLoaded) { setIsSDKLoaded(true); load(); }
   }, [isSDKLoaded, checkContractStatus]);
 
   const handleConnect = async () => {
     setErrorMsg(null);
     const provider = getProvider();
-
-    if (!provider) {
-      setErrorMsg("Wallet not found. Open in Warpcast Mobile.");
-      return;
-    }
-
+    if (!provider) { setErrorMsg("Wallet not found. Open in Warpcast Mobile."); return; }
     try {
-      const client = createWalletClient({
-        chain: base,
-        transport: custom(provider)
-      });
-
+      const client = createWalletClient({ chain: base, transport: custom(provider) });
       const [connectedAddress] = await client.requestAddresses();
       setAddress(connectedAddress);
       await checkContractStatus(connectedAddress);
-      
-    } catch (error: any) {
-      console.error("Connection failed:", error);
-      setErrorMsg("Connection failed. Please retry.");
-    }
+    } catch (error) { setErrorMsg("Connection failed. Please retry."); }
   };
 
   const handleClaim = async () => {
     if (!address) return;
-    setIsClaiming(true);
-    setTxHash(null);
-    setErrorMsg(null);
-
+    setIsClaiming(true); setTxHash(null); setErrorMsg(null);
     const provider = getProvider();
     
     try {
-      const client = createWalletClient({
-        chain: base,
-        transport: custom(provider)
-      });
-
-      const { request } = await createPublicClient({
-        chain: base,
-        transport: http()
-      }).simulateContract({
+      const client = createWalletClient({ chain: base, transport: custom(provider) });
+      const { request } = await createPublicClient({ chain: base, transport: http() }).simulateContract({
         account: address as `0x${string}`,
         address: CONTRACT_ADDRESS,
         abi: ABI,
@@ -157,29 +121,22 @@ function App() {
 
       const hash = await client.writeContract(request);
       setTxHash(hash);
-
       const publicClient = createPublicClient({ chain: base, transport: http() });
       await publicClient.waitForTransactionReceipt({ hash });
       
       checkContractStatus(address);
-      alert("Success! 10 DEGEN claimed.");
-
+      alert("Success! Daily DEGEN claimed.");
     } catch (error: any) {
       console.error("Claim failed:", error);
-      if (error.message.includes("Cooldown")) {
-        setErrorMsg("Cooldown active! Please wait.");
-      } else if (error.message.includes("Insufficient")) {
-        setErrorMsg("Santa is out of gifts (Contract Empty).");
-      } else {
-        setErrorMsg("Claim failed. Ensure you have ETH on Base.");
-      }
-    } finally {
-      setIsClaiming(false);
-    }
+      if (error.message.includes("AlreadyClaimed")) setErrorMsg("Already claimed today! Come back at 8 AM.");
+      else if (error.message.includes("Insufficient")) setErrorMsg("Santa is out of gifts (Contract Empty).");
+      else setErrorMsg("Claim failed. Ensure you have ETH on Base.");
+    } finally { setIsClaiming(false); }
   };
 
+  // --- UPDATED SHARE TEXT HERE ---
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`I just claimed 10 $DEGEN! 🎁\n\nClaim yours daily here 👇`);
+    const text = encodeURIComponent(`I just claimed 10 $DEGEN! 🎁\n\nClaim yours here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
@@ -201,15 +158,22 @@ function App() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    if (!canClaimNow) {
+      const timer = setInterval(() => setTimeUntilReset(calculateTimeUntilReset()), 1000);
+      return () => clearInterval(timer);
+    }
+  }, [canClaimNow]);
+
   const formatTime = (seconds: number) => {
     const h = Math.floor(seconds / 3600);
     const m = Math.floor((seconds % 3600) / 60);
-    return `${h}h ${m}m`;
+    const s = seconds % 60;
+    return `${h}h ${m}m ${s}s`;
   };
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-red-900 via-red-800 to-red-950 flex items-center justify-center overflow-hidden relative font-['Poppins'] text-white">
-      
       {snowflakes.map((flake) => (
         <div key={flake} className="absolute text-white pointer-events-none select-none z-0" style={{top: '-20px', left: `${Math.random() * 100}vw`, fontSize: `${Math.random() * 10 + 10}px`, animation: `fall ${Math.random() * 3 + 3}s linear forwards`, opacity: Math.random() * 0.7 + 0.3}}>❄</div>
       ))}
@@ -217,85 +181,42 @@ function App() {
 
       <div className="relative z-10 mx-4">
         <div className="bg-white/10 backdrop-blur-lg border border-white/20 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center transform transition-all duration-300 hover:scale-[1.02]">
+          <div className="flex justify-center mb-6"><Gift className="w-24 h-24 text-yellow-400 animate-bounce drop-shadow-lg" /></div>
+          <h1 className="font-['Mountains_of_Christmas'] text-5xl mb-4 text-yellow-400 drop-shadow-md font-bold tracking-wide">Merry Christmas</h1>
+          <p className="text-xl font-semibold mb-6 tracking-wide">{context?.user?.username ? `Hi @${context.user.username}!` : ''}</p>
           
-          <div className="flex justify-center mb-6">
-            <Gift className="w-24 h-24 text-yellow-400 animate-bounce drop-shadow-lg" />
-          </div>
-
-          <h1 className="font-['Mountains_of_Christmas'] text-5xl mb-4 text-yellow-400 drop-shadow-md font-bold tracking-wide">
-            Merry Christmas
-          </h1>
-
-          <p className="text-xl font-semibold mb-6 tracking-wide">
-            {context?.user?.username ? `Hi @${context.user.username}!` : ''}
-          </p>
-
-          {errorMsg && (
-            <div className="mb-4 p-2 bg-red-500/50 rounded-lg text-sm text-white font-medium animate-pulse">
-              {errorMsg}
-            </div>
-          )}
+          {errorMsg && <div className="mb-4 p-2 bg-red-500/50 rounded-lg text-sm text-white font-medium animate-pulse">{errorMsg}</div>}
 
           <div className="border-t border-white/20 pt-6 mt-4 mb-8">
-            <p className="text-yellow-200 font-medium text-lg leading-relaxed">
-              Connect wallet and claim your REAL DEGEN tokens (Base).
-            </p>
+            <p className="text-yellow-200 font-medium text-lg leading-relaxed">Connect wallet and claim your REAL DEGEN tokens (Base).</p>
           </div>
 
           <div className="flex flex-col gap-3">
-            
             {!address ? (
-              <button 
-                onClick={handleConnect}
-                className="w-full group flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200"
-              >
-                <Zap className="w-5 h-5" />
-                <span>Connect Farcaster Wallet</span>
+              <button onClick={handleConnect} className="w-full group flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200">
+                <Zap className="w-5 h-5" /><span>Connect Farcaster Wallet</span>
               </button>
-            ) : nextClaimIn > 0 ? (
-               <button 
-                disabled
-                className="w-full group flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-lg cursor-not-allowed"
-              >
-                <Lock className="w-5 h-5" />
-                <span>Next Claim: {formatTime(nextClaimIn)}</span>
+            ) : !canClaimNow ? (
+               <button disabled className="w-full group flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-lg cursor-not-allowed">
+                <Lock className="w-5 h-5" /><span>Reset in: {formatTime(timeUntilReset)}</span>
               </button>
             ) : (
-              <button 
-                onClick={handleClaim}
-                disabled={isClaiming}
-                className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02] animate-pulse"
-              >
-                {isClaiming ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}
-                <span>Claim 10 DEGEN</span>
+              <button onClick={handleClaim} disabled={isClaiming} className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02] animate-pulse">
+                {isClaiming ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}<span>Claim Daily Reward</span>
               </button>
             )}
 
-            {txHash && (
-               <a 
-                href={`https://basescan.org/tx/${txHash}`}
-                target="_blank"
-                rel="noreferrer"
-                className="text-xs text-blue-300 underline mb-2"
-              >
-                View Transaction on Basescan
-              </a>
-            )}
+            {txHash && <a href={`https://basescan.org/tx/${txHash}`} target="_blank" rel="noreferrer" className="text-xs text-blue-300 underline mb-2">View Transaction on Basescan</a>}
 
             <button onClick={handleWarpcastShare} className="w-full group flex items-center justify-center gap-2 bg-[#855DCD] hover:bg-[#7c54c2] text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200">
-              <ExternalLink className="w-5 h-5" />
-              <span>Share</span>
+              <ExternalLink className="w-5 h-5" /><span>Share</span>
             </button>
-
             {!added && (
               <button onClick={handleAddApp} className="w-full group flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200">
-                <Plus className="w-5 h-5" />
-                <span>Save Gift to Apps</span>
+                <Plus className="w-5 h-5" /><span>Save Gift to Apps</span>
               </button>
             )}
-
           </div>
-
         </div>
       </div>
     </div>
