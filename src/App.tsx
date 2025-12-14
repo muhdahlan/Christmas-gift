@@ -134,9 +134,9 @@ function App() {
     } finally { setIsClaiming(false); }
   };
 
-  // --- UPDATED SHARE TEXT HERE ---
+  // --- UPDATED TEXT WITH "DAILY" ---
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`I just claimed 10 $DEGEN! 🎁\n\nClaim yours here 👇`);
+    const text = encodeURIComponent(`I just claimed 10 $DEGEN! 🎁\n\nClaim yours daily here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
