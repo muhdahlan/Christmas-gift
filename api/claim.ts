@@ -2,12 +2,14 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, toBytes } from 'viem';
 import { kv } from '@vercel/kv';
 
-const REWARD_AMOUNT = 10000000000000000000n;
+const REWARD_AMOUNT = 10000000000000000000n; // 10 DEGEN
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const userAddress = body.userAddress;
+    // Normalize address to lowercase to prevent duplicate claims via case manipulation
+    const userAddress = (body.userAddress || "").toLowerCase();
+    
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
 
     if (!userAddress || !SIGNER_PRIVATE_KEY) {
@@ -17,19 +19,19 @@ export async function POST(request: Request) {
       });
     }
 
+    // --- DAILY LIMIT LOGIC ---
+    // 08:00 AM WITA (Makassar) is exactly 00:00 Midnight UTC.
+    // We check if the user has claimed since the last UTC midnight.
+    
     const now = new Date();
-    const witaString = now.toLocaleString("en-US", { timeZone: "Asia/Makassar" });
-    const witaDate = new Date(witaString);
+    const lastResetTime = new Date(now);
+    // Set to 00:00:00 UTC today (Equivalent to 08:00 AM WITA today)
+    lastResetTime.setUTCHours(0, 0, 0, 0);
 
-    let lastResetTime = new Date(witaDate);
-    lastResetTime.setHours(8, 0, 0, 0);
-
-    if (witaDate.getHours() < 8) {
-        lastResetTime.setDate(lastResetTime.getDate() - 1);
-    }
-
+    // Check Database
     const lastClaimTimestamp = await kv.get<number>(`claim:${userAddress}`);
 
+    // If claim exists AND was made AFTER the last reset time
     if (lastClaimTimestamp && lastClaimTimestamp > lastResetTime.getTime()) {
         return new Response(JSON.stringify({ 
             success: false, 
@@ -40,6 +42,7 @@ export async function POST(request: Request) {
         });
     }
 
+    // --- SIGNATURE GENERATION ---
     const nonce = BigInt(Date.now());
     const account = privateKeyToAccount(SIGNER_PRIVATE_KEY);
 
@@ -54,6 +57,7 @@ export async function POST(request: Request) {
       message: { raw: toBytes(messageHash) },
     });
 
+    // --- SAVE CLAIM TIMESTAMP ---
     await kv.set(`claim:${userAddress}`, Date.now());
 
     return new Response(JSON.stringify({
