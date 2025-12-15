@@ -1,11 +1,12 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock } from 'lucide-react';
+import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock, UserPlus } from 'lucide-react';
 import sdk, { type Context } from '@farcaster/frame-sdk';
 import { createWalletClient, custom, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
 // --- CONFIG ---
 const CONTRACT_ADDRESS = "0x410f69e4753429950bd66a3bfc12129257571df9";
+const DEV_PROFILE_URL = "https://warpcast.com/0xpocky"; 
 
 const ABI = [
   {
@@ -34,6 +35,15 @@ function App() {
 
   const [nextClaimTime, setNextClaimTime] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>("");
+
+  const [hasFollowed, setHasFollowed] = useState(false);
+
+  useEffect(() => {
+    const checkFollow = localStorage.getItem("hasFollowedDev");
+    if (checkFollow === "true") {
+      setHasFollowed(true);
+    }
+  }, []);
 
   const calculateNextReset = () => {
     const now = new Date();
@@ -107,6 +117,14 @@ function App() {
     } catch (error) { setErrorMsg("Connection failed. Please retry."); }
   };
 
+  const handleFollowDev = useCallback(() => {
+    sdk.actions.openUrl(DEV_PROFILE_URL);
+    localStorage.setItem("hasFollowedDev", "true");
+    setTimeout(() => {
+        setHasFollowed(true);
+    }, 1000); 
+  }, []);
+
   const handleClaim = async () => {
     if (!address) return;
     setIsClaiming(true); setTxHash(null); setErrorMsg(null);
@@ -157,7 +175,7 @@ function App() {
   };
 
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`I just claimed 10 $DEGEN! 🎁\n\nSecure & Anti-Bot. Claim yours here 👇`);
+    const text = encodeURIComponent(`I just claimed 10 $DEGEN on Christmas Gift\n\nClaim yours daily here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
@@ -202,6 +220,10 @@ function App() {
             {!address ? (
               <button onClick={handleConnect} className="w-full group flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200">
                 <Zap className="w-5 h-5" /><span>Connect Farcaster Wallet</span>
+              </button>
+            ) : !hasFollowed ? (
+              <button onClick={handleFollowDev} className="w-full group flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 animate-pulse">
+                <UserPlus className="w-5 h-5" /><span>Follow Dev to Unlock</span>
               </button>
             ) : nextClaimTime ? (
               <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed">
