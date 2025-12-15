@@ -129,15 +129,12 @@ function App() {
     if (!address) return;
     setIsClaiming(true); setTxHash(null); setErrorMsg(null);
     
-    // GET FID FROM CONTEXT
-    const fid = context?.user?.fid;
-
     try {
+      // Reverted: No FID sent, just address
       const response = await fetch('/api/claim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        // SEND FID TO BACKEND
-        body: JSON.stringify({ userAddress: address, fid: fid }),
+        body: JSON.stringify({ userAddress: address }),
       });
 
       const data = await response.json();
@@ -174,7 +171,7 @@ function App() {
       console.error("Claim failed:", error);
       if (error.message.includes("Signature")) setErrorMsg("Security check failed.");
       else if (error.message.includes("already claimed")) setErrorMsg(error.message); 
-      else setErrorMsg("Claim failed or rejected.");
+      else setErrorMsg(error.message || "Claim failed.");
     } finally { setIsClaiming(false); }
   };
 
