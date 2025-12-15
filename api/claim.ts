@@ -17,7 +17,6 @@ export async function POST(request: Request) {
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
 
     if (!userAddress || !SIGNER_PRIVATE_KEY || !fid || isNaN(fid)) {
-      console.error("[ERROR] Missing config or FID");
       return new Response(JSON.stringify({ error: 'Config Error or Missing FID' }), { 
         status: 400,
         headers: { 'Content-Type': 'application/json' }
@@ -26,8 +25,9 @@ export async function POST(request: Request) {
 
     const client = getSSLHubRpcClient(HUB_URL);
     let isVerified = false;
+    
+    const allFoundAddresses: string[] = [];
 
-    // --- 1. CEK VERIFICATION DENGAN PAGINATION (LOOPING HALAMAN) ---
     console.log("[DEBUG] Checking Linked Addresses (All Pages)...");
     
     let pageToken: Uint8Array | undefined;
@@ -44,13 +44,14 @@ export async function POST(request: Request) {
             const data = verificationsResult.value;
             const verifications = data.messages;
             
-            console.log(`[DEBUG] Page ${pageCount}: Found ${verifications.length} addresses.`);
-
             for (const msg of verifications) {
                 if (msg.data?.verificationAddAddressBody?.address) {
                     const verifiedAddress = "0x" + Buffer.from(msg.data.verificationAddAddressBody.address).toString('hex');
+                    const normalizedAddr = verifiedAddress.toLowerCase();
                     
-                    if (verifiedAddress.toLowerCase() === userAddress) {
+                    allFoundAddresses.push(normalizedAddr);
+                    
+                    if (normalizedAddr === userAddress) {
                         console.log(`[SUCCESS] Match found on Page ${pageCount}: ${verifiedAddress}`);
                         isVerified = true;
                         break;
@@ -59,7 +60,6 @@ export async function POST(request: Request) {
             }
             
             pageToken = data.nextPageToken;
-            
             if (isVerified) break;
 
         } else {
@@ -69,12 +69,8 @@ export async function POST(request: Request) {
 
     } while (pageToken && pageToken.length > 0);
 
-
-    // --- 2. CEK CUSTODY (BACKUP) ---
     if (!isVerified) {
-        console.log("[DEBUG] Checking Custody Address...");
         let custodyResult;
-        
         if ((client as any).getOnChainIdRegistryEvent) {
              custodyResult = await (client as any).getOnChainIdRegistryEvent({ fid });
         } 
@@ -88,9 +84,11 @@ export async function POST(request: Request) {
             
             if (toAddressBytes) {
                  const custodyAddress = "0x" + Buffer.from(toAddressBytes).toString('hex');
-                 console.log(`[DEBUG] Custody Address is: ${custodyAddress}`);
+                 const normalizedCustody = custodyAddress.toLowerCase();
+                 
+                 allFoundAddresses.push(normalizedCustody + " (CUSTODY)");
 
-                 if (custodyAddress.toLowerCase() === userAddress) {
+                 if (normalizedCustody === userAddress) {
                     console.log("[SUCCESS] Match found in Custody Address!");
                     isVerified = true;
                  }
@@ -101,17 +99,20 @@ export async function POST(request: Request) {
     client.close();
 
     if (!isVerified) {
-        console.warn(`[FAILED] Wallet ${userAddress} is NOT linked to FID ${fid} after scanning all pages.`);
+        console.warn("---------------------------------------------------");
+        console.warn(`[FAILED] Target: ${userAddress}`);
+        console.warn(`[DEBUG] Known Addresses for FID ${fid}:`, JSON.stringify(allFoundAddresses));
+        console.warn("---------------------------------------------------");
+        
         return new Response(JSON.stringify({ 
             success: false, 
-            error: 'Wallet not linked. Please wait 10 mins if you just verified it.' 
+            error: 'Wallet not found in Hub. It may take 30 mins to sync after verifying.' 
         }), { 
             status: 403, 
             headers: { 'Content-Type': 'application/json' }
         });
     }
 
-    // --- LOGIC KUNCI & LIMIT ---
     const lockKey = `lock:fid:${fid}`;
     const acquiredLock = await kv.set(lockKey, 'processing', { nx: true, ex: 10 });
     if (!acquiredLock) {
