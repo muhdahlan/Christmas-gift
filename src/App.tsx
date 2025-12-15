@@ -14,7 +14,7 @@ const ABI = [
       { "internalType": "uint256", "name": "nonce", "type": "uint256" },
       { "internalType": "bytes", "name": "signature", "type": "bytes" }
     ],
-    "name": "claimSecure",
+    "name": "claim",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -135,7 +135,7 @@ function App() {
         account: address as `0x${string}`,
         address: CONTRACT_ADDRESS,
         abi: ABI,
-        functionName: 'claimSecure',
+        functionName: 'claim',
         args: [BigInt(data.amount), BigInt(data.nonce), data.signature],
       });
 
