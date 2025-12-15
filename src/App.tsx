@@ -32,17 +32,14 @@ function App() {
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  // STATE BARU: Untuk Timer
   const [nextClaimTime, setNextClaimTime] = useState<number | null>(null);
   const [timeLeft, setTimeLeft] = useState<string>("");
 
-  // --- LOGIKA TIMER (Hitung mundur ke 08:00 WITA / 00:00 UTC) ---
   const calculateNextReset = () => {
     const now = new Date();
     const target = new Date(now);
-    target.setUTCHours(0, 0, 0, 0); // 00:00 UTC = 08:00 WITA
+    target.setUTCHours(0, 0, 0, 0); 
     
-    // Jika jam 00:00 UTC sudah lewat, targetnya besok
     if (now.getTime() >= target.getTime()) {
       target.setUTCDate(target.getUTCDate() + 1);
     }
@@ -57,7 +54,7 @@ function App() {
       const diff = nextClaimTime - now;
 
       if (diff <= 0) {
-        setNextClaimTime(null); // Timer habis, tombol muncul lagi
+        setNextClaimTime(null);
         clearInterval(interval);
       } else {
         const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
@@ -115,7 +112,6 @@ function App() {
     setIsClaiming(true); setTxHash(null); setErrorMsg(null);
     
     try {
-      // 1. Minta Signature ke Backend
       const response = await fetch('/api/claim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -124,16 +120,14 @@ function App() {
 
       const data = await response.json();
 
-      // Jika Backend menolak (Limit Habis), aktifkan Timer
       if (!data.success) {
-        if (data.error && data.error.includes("Daily limit")) {
-           setNextClaimTime(calculateNextReset()); // Aktifkan Timer
-           throw new Error("You already claimed today! Come back at 08:00 AM WITA.");
+        if (data.error && (data.error.includes("Daily limit") || data.error.includes("claimed"))) {
+           setNextClaimTime(calculateNextReset()); 
+           throw new Error("You already claimed today!"); 
         }
         throw new Error(data.error || "Server error");
       }
 
-      // 2. Eksekusi Smart Contract
       const provider = getProvider();
       const client = createWalletClient({ chain: base, transport: custom(provider) });
       
@@ -152,14 +146,12 @@ function App() {
       await publicClient.waitForTransactionReceipt({ hash });
       
       alert("Success! 10 DEGEN Secured & Claimed.");
-      
-      // Sukses Klaim -> Aktifkan Timer
       setNextClaimTime(calculateNextReset());
 
     } catch (error: any) {
       console.error("Claim failed:", error);
       if (error.message.includes("Signature")) setErrorMsg("Security check failed.");
-      else if (error.message.includes("already claimed")) setErrorMsg(error.message); // Pesan dari timer
+      else if (error.message.includes("already claimed")) setErrorMsg(error.message); 
       else setErrorMsg("Claim failed or rejected.");
     } finally { setIsClaiming(false); }
   };
@@ -212,13 +204,11 @@ function App() {
                 <Zap className="w-5 h-5" /><span>Connect Farcaster Wallet</span>
               </button>
             ) : nextClaimTime ? (
-              // --- TAMPILAN JIKA SEDANG COOLDOWN (TIMER) ---
               <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed">
                 <Clock className="w-5 h-5 animate-pulse" />
                 <span>Next: {timeLeft}</span>
               </button>
             ) : (
-              // --- TAMPILAN NORMAL (TOMBOL CLAIM) ---
               <button onClick={handleClaim} disabled={isClaiming} className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02] animate-pulse">
                 {isClaiming ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}<span>Claim 10 DEGEN</span>
               </button>
