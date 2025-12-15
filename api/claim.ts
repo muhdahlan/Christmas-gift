@@ -8,7 +8,6 @@ export async function POST(request: Request) {
   try {
     const body = await request.json();
     const userAddress = (body.userAddress || "").toLowerCase();
-    
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
 
     if (!userAddress || !SIGNER_PRIVATE_KEY) {
@@ -18,9 +17,21 @@ export async function POST(request: Request) {
       });
     }
 
+    // --- ATOMIC LOCK (ANTI RACE CONDITION) ---
+    const lockKey = `lock:${userAddress}`;
+    const acquiredLock = await kv.set(lockKey, 'processing', { nx: true, ex: 10 });
+
+    if (!acquiredLock) {
+      return new Response(JSON.stringify({ 
+        success: false, 
+        error: 'Too many requests. Please wait.' 
+      }), { 
+        status: 429, 
+        headers: { 'Content-Type': 'application/json' }
+      });
+    }
+
     // --- DAILY LIMIT LOGIC ---
-    // Reset at 00:00 UTC (08:00 AM WITA)
-    
     const now = new Date();
     const lastResetTime = new Date(now);
     lastResetTime.setUTCHours(0, 0, 0, 0);
@@ -52,6 +63,7 @@ export async function POST(request: Request) {
       message: { raw: toBytes(messageHash) },
     });
 
+    // --- SAVE CLAIM TIMESTAMP ---
     await kv.set(`claim:${userAddress}`, Date.now());
 
     return new Response(JSON.stringify({
