@@ -1,8 +1,9 @@
 import { privateKeyToAccount } from 'viem/accounts';
-import { keccak256, encodePacked, toBytes } from 'viem';
+import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem';
+import { base } from 'viem/chains';
 import { kv } from '@vercel/kv';
 
-const REWARD_AMOUNT = 10000000000000000000n; // 10 DEGEN
+const REWARD_AMOUNT = 10000000000000000000n; 
 
 export async function POST(request: Request) {
   try {
@@ -17,8 +18,26 @@ export async function POST(request: Request) {
       });
     }
 
-    // --- ATOMIC LOCK (Based on Address) ---
-    // Mencegah double-click / race condition
+    const publicClient = createPublicClient({ 
+        chain: base, 
+        transport: http() 
+    });
+
+    const bytecode = await publicClient.getBytecode({ 
+        address: userAddress as `0x${string}` 
+    });
+
+    if (bytecode) {
+        console.warn(`[BOT BLOCKED] Contract detected: ${userAddress}`);
+        return new Response(JSON.stringify({ 
+            success: false, 
+            error: 'Security Alert: Smart Contracts are not allowed to claim!' 
+        }), { 
+            status: 403, 
+            headers: { 'Content-Type': 'application/json' }
+        });
+    }
+
     const lockKey = `lock:${userAddress}`;
     const acquiredLock = await kv.set(lockKey, 'processing', { nx: true, ex: 10 });
 
@@ -32,7 +51,6 @@ export async function POST(request: Request) {
       });
     }
 
-    // --- DAILY LIMIT LOGIC (Based on Address) ---
     const now = new Date();
     const lastResetTime = new Date(now);
     lastResetTime.setUTCHours(0, 0, 0, 0);
@@ -49,7 +67,6 @@ export async function POST(request: Request) {
         });
     }
 
-    // --- SIGNATURE GENERATION ---
     const nonce = BigInt(Date.now());
     const account = privateKeyToAccount(SIGNER_PRIVATE_KEY);
 
@@ -64,7 +81,6 @@ export async function POST(request: Request) {
       message: { raw: toBytes(messageHash) },
     });
 
-    // --- SAVE CLAIM TIMESTAMP ---
     await kv.set(`claim:${userAddress}`, Date.now());
 
     return new Response(JSON.stringify({
