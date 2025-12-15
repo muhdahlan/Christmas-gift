@@ -3,7 +3,7 @@ import { keccak256, encodePacked, toBytes } from 'viem';
 import { kv } from '@vercel/kv';
 import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
 
-const REWARD_AMOUNT = 10000000000000000000n; // 10 DEGEN
+const REWARD_AMOUNT = 10000000000000000000n; 
 const HUB_URL = 'nemes.farcaster.xyz:2283'; 
 
 export async function POST(request: Request) {
@@ -39,11 +39,24 @@ export async function POST(request: Request) {
     }
 
     if (!isVerified) {
-        const custodyResult = await client.getIdRegistryEvent({ fid });
-        if (custodyResult.isOk()) {
-            const custodyAddress = "0x" + Buffer.from(custodyResult.value.to).toString('hex');
-            if (custodyAddress.toLowerCase() === userAddress) {
-                isVerified = true;
+        let custodyResult;
+        
+        if ((client as any).getOnChainIdRegistryEvent) {
+             custodyResult = await (client as any).getOnChainIdRegistryEvent({ fid });
+        } 
+        else if ((client as any).getIdRegistryEvent) {
+             custodyResult = await (client as any).getIdRegistryEvent({ fid });
+        }
+
+        if (custodyResult && custodyResult.isOk()) {
+            const eventBody = custodyResult.value;
+            const toAddressBytes = eventBody.to || eventBody.idRegistryEvent?.to;
+            
+            if (toAddressBytes) {
+                 const custodyAddress = "0x" + Buffer.from(toAddressBytes).toString('hex');
+                 if (custodyAddress.toLowerCase() === userAddress) {
+                    isVerified = true;
+                 }
             }
         }
     }
