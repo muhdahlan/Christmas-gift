@@ -129,11 +129,15 @@ function App() {
     if (!address) return;
     setIsClaiming(true); setTxHash(null); setErrorMsg(null);
     
+    // GET FID FROM CONTEXT
+    const fid = context?.user?.fid;
+
     try {
       const response = await fetch('/api/claim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userAddress: address }),
+        // SEND FID TO BACKEND
+        body: JSON.stringify({ userAddress: address, fid: fid }),
       });
 
       const data = await response.json();
