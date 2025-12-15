@@ -12,7 +12,6 @@ export async function POST(request: Request) {
     const userAddress = (body.userAddress || "").toLowerCase();
     const fid = Number(body.fid); 
     
-    // --- DEBUG LOG START ---
     console.log(`[CLAIM START] Request from Address: ${userAddress} | FID: ${fid}`);
     
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
@@ -28,35 +27,54 @@ export async function POST(request: Request) {
     const client = getSSLHubRpcClient(HUB_URL);
     let isVerified = false;
 
-    // 1. Cek Verification (Linked Wallet)
-    console.log("[DEBUG] Checking Linked Addresses...");
-    const verificationsResult = await client.getVerificationsByFid({ fid });
+    // --- 1. CEK VERIFICATION DENGAN PAGINATION (LOOPING HALAMAN) ---
+    console.log("[DEBUG] Checking Linked Addresses (All Pages)...");
     
-    if (verificationsResult.isOk()) {
-      const verifications = verificationsResult.value.messages;
-      console.log(`[DEBUG] Found ${verifications.length} linked addresses.`);
-      
-      for (const msg of verifications) {
-        if (msg.data?.verificationAddAddressBody?.address) {
-            const verifiedAddress = "0x" + Buffer.from(msg.data.verificationAddAddressBody.address).toString('hex');
-            console.log(`[DEBUG] Checking linked: ${verifiedAddress}`); // LIHAT INI DI LOG
-            
-            if (verifiedAddress.toLowerCase() === userAddress) {
-                console.log("[SUCCESS] Match found in Linked Addresses!");
-                isVerified = true;
-                break;
-            }
-        }
-      }
-    } else {
-        console.log("[DEBUG] No linked addresses found or Hub Error.");
-    }
+    let pageToken: Uint8Array | undefined;
+    let pageCount = 0;
+    
+    do {
+        pageCount++;
+        const verificationsResult = await client.getVerificationsByFid({ 
+            fid, 
+            pageToken: pageToken 
+        });
 
-    // 2. Cek Custody (Main Wallet)
+        if (verificationsResult.isOk()) {
+            const data = verificationsResult.value;
+            const verifications = data.messages;
+            
+            console.log(`[DEBUG] Page ${pageCount}: Found ${verifications.length} addresses.`);
+
+            for (const msg of verifications) {
+                if (msg.data?.verificationAddAddressBody?.address) {
+                    const verifiedAddress = "0x" + Buffer.from(msg.data.verificationAddAddressBody.address).toString('hex');
+                    
+                    if (verifiedAddress.toLowerCase() === userAddress) {
+                        console.log(`[SUCCESS] Match found on Page ${pageCount}: ${verifiedAddress}`);
+                        isVerified = true;
+                        break;
+                    }
+                }
+            }
+            
+            pageToken = data.nextPageToken;
+            
+            if (isVerified) break;
+
+        } else {
+            console.log("[DEBUG] Error fetching verifications page.");
+            break;
+        }
+
+    } while (pageToken && pageToken.length > 0);
+
+
+    // --- 2. CEK CUSTODY (BACKUP) ---
     if (!isVerified) {
         console.log("[DEBUG] Checking Custody Address...");
-        
         let custodyResult;
+        
         if ((client as any).getOnChainIdRegistryEvent) {
              custodyResult = await (client as any).getOnChainIdRegistryEvent({ fid });
         } 
@@ -70,36 +88,33 @@ export async function POST(request: Request) {
             
             if (toAddressBytes) {
                  const custodyAddress = "0x" + Buffer.from(toAddressBytes).toString('hex');
-                 console.log(`[DEBUG] Custody Address is: ${custodyAddress}`); // LIHAT INI DI LOG
+                 console.log(`[DEBUG] Custody Address is: ${custodyAddress}`);
 
                  if (custodyAddress.toLowerCase() === userAddress) {
                     console.log("[SUCCESS] Match found in Custody Address!");
                     isVerified = true;
                  }
             }
-        } else {
-             console.log("[DEBUG] Failed to fetch Custody Address.");
         }
     }
 
     client.close();
 
     if (!isVerified) {
-        console.warn(`[FAILED] Wallet ${userAddress} is NOT linked to FID ${fid}`);
+        console.warn(`[FAILED] Wallet ${userAddress} is NOT linked to FID ${fid} after scanning all pages.`);
         return new Response(JSON.stringify({ 
             success: false, 
-            error: 'Security Alert: Wallet does not belong to this Farcaster ID. Please link it in Warpcast settings.' 
+            error: 'Wallet not linked. Please wait 10 mins if you just verified it.' 
         }), { 
             status: 403, 
             headers: { 'Content-Type': 'application/json' }
         });
     }
 
-    // --- LOGIC BIASA ---
+    // --- LOGIC KUNCI & LIMIT ---
     const lockKey = `lock:fid:${fid}`;
     const acquiredLock = await kv.set(lockKey, 'processing', { nx: true, ex: 10 });
     if (!acquiredLock) {
-      console.warn("[RATE LIMIT] Too many requests");
       return new Response(JSON.stringify({ success: false, error: 'Too many requests. Please wait.' }), { status: 429 });
     }
 
@@ -109,7 +124,6 @@ export async function POST(request: Request) {
 
     const lastClaimTimestamp = await kv.get<number>(`claim:fid:${fid}`);
     if (lastClaimTimestamp && lastClaimTimestamp > lastResetTime.getTime()) {
-        console.warn("[LIMIT] User already claimed today");
         return new Response(JSON.stringify({ success: false, error: 'You already claimed today!' }), { status: 429 });
     }
 
@@ -119,7 +133,6 @@ export async function POST(request: Request) {
     const signature = await account.signMessage({ message: { raw: toBytes(messageHash) } });
 
     await kv.set(`claim:fid:${fid}`, Date.now());
-    console.log("[SUCCESS] Claim signature generated successfully!");
 
     return new Response(JSON.stringify({
       success: true,
