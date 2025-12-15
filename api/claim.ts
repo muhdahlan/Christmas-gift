@@ -1,28 +1,67 @@
 import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, toBytes } from 'viem';
 import { kv } from '@vercel/kv';
+import { getSSLHubRpcClient } from '@farcaster/hub-nodejs';
 
 const REWARD_AMOUNT = 10000000000000000000n; // 10 DEGEN
+const HUB_URL = 'nemes.farcaster.xyz:2283'; 
 
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const userAddress = (body.userAddress || "").toLowerCase();
-    const fid = body.fid; 
+    const fid = Number(body.fid); 
     
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
 
-    if (!userAddress || !SIGNER_PRIVATE_KEY || !fid) {
+    if (!userAddress || !SIGNER_PRIVATE_KEY || !fid || isNaN(fid)) {
       return new Response(JSON.stringify({ error: 'Config Error or Missing FID' }), { 
         status: 400,
         headers: { 'Content-Type': 'application/json' }
       });
     }
 
-    // --- ATOMIC LOCK (ANTI RACE CONDITION - BY FID) ---
+    const client = getSSLHubRpcClient(HUB_URL);
+    let isVerified = false;
+
+    const verificationsResult = await client.getVerificationsByFid({ fid });
+    if (verificationsResult.isOk()) {
+      const verifications = verificationsResult.value.messages;
+      for (const msg of verifications) {
+        if (msg.data?.verificationAddAddressBody?.address) {
+            const verifiedAddress = "0x" + Buffer.from(msg.data.verificationAddAddressBody.address).toString('hex');
+            if (verifiedAddress.toLowerCase() === userAddress) {
+                isVerified = true;
+                break;
+            }
+        }
+      }
+    }
+
+    if (!isVerified) {
+        const custodyResult = await client.getIdRegistryEvent({ fid });
+        if (custodyResult.isOk()) {
+            const custodyAddress = "0x" + Buffer.from(custodyResult.value.to).toString('hex');
+            if (custodyAddress.toLowerCase() === userAddress) {
+                isVerified = true;
+            }
+        }
+    }
+
+    client.close();
+
+    if (!isVerified) {
+        return new Response(JSON.stringify({ 
+            success: false, 
+            error: 'Security Alert: Wallet does not belong to this Farcaster ID.' 
+        }), { 
+            status: 403, 
+            headers: { 'Content-Type': 'application/json' }
+        });
+    }
+
     const lockKey = `lock:fid:${fid}`;
     const acquiredLock = await kv.set(lockKey, 'processing', { nx: true, ex: 10 });
-
     if (!acquiredLock) {
       return new Response(JSON.stringify({ 
         success: false, 
@@ -33,14 +72,11 @@ export async function POST(request: Request) {
       });
     }
 
-    // --- DAILY LIMIT LOGIC (BY FID) ---
     const now = new Date();
     const lastResetTime = new Date(now);
     lastResetTime.setUTCHours(0, 0, 0, 0);
 
-    // CHECK DATABASE USING FID
     const lastClaimTimestamp = await kv.get<number>(`claim:fid:${fid}`);
-
     if (lastClaimTimestamp && lastClaimTimestamp > lastResetTime.getTime()) {
         return new Response(JSON.stringify({ 
             success: false, 
@@ -51,22 +87,16 @@ export async function POST(request: Request) {
         });
     }
 
-    // --- SIGNATURE GENERATION ---
     const nonce = BigInt(Date.now());
     const account = privateKeyToAccount(SIGNER_PRIVATE_KEY);
-
     const messageHash = keccak256(
       encodePacked(
         ['address', 'uint256', 'uint256'],
         [userAddress as `0x${string}`, REWARD_AMOUNT, nonce]
       )
     );
+    const signature = await account.signMessage({ message: { raw: toBytes(messageHash) } });
 
-    const signature = await account.signMessage({
-      message: { raw: toBytes(messageHash) },
-    });
-
-    // --- SAVE CLAIM TIMESTAMP (BY FID) ---
     await kv.set(`claim:fid:${fid}`, Date.now());
 
     return new Response(JSON.stringify({
