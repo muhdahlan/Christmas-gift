@@ -1,9 +1,10 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Gift, ExternalLink, Plus, Coins, Loader2, Zap } from 'lucide-react';
-import sdk from '@farcaster/frame-sdk';
+import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock } from 'lucide-react';
+import sdk, { type Context } from '@farcaster/frame-sdk';
 import { createWalletClient, custom, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
+// --- CONFIG ---
 const CONTRACT_ADDRESS = "0x410f69e4753429950bd66a3bfc12129257571df9";
 
 const ABI = [
@@ -13,7 +14,7 @@ const ABI = [
       { "internalType": "uint256", "name": "nonce", "type": "uint256" },
       { "internalType": "bytes", "name": "signature", "type": "bytes" }
     ],
-    "name": "claim",
+    "name": "claimSecure",
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
@@ -25,10 +26,49 @@ function App() {
   const [context, setContext] = useState<any>(); 
   const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   const [added, setAdded] = useState(false);
+  
   const [address, setAddress] = useState<string | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
+
+  // STATE BARU: Untuk Timer
+  const [nextClaimTime, setNextClaimTime] = useState<number | null>(null);
+  const [timeLeft, setTimeLeft] = useState<string>("");
+
+  // --- LOGIKA TIMER (Hitung mundur ke 08:00 WITA / 00:00 UTC) ---
+  const calculateNextReset = () => {
+    const now = new Date();
+    const target = new Date(now);
+    target.setUTCHours(0, 0, 0, 0); // 00:00 UTC = 08:00 WITA
+    
+    // Jika jam 00:00 UTC sudah lewat, targetnya besok
+    if (now.getTime() >= target.getTime()) {
+      target.setUTCDate(target.getUTCDate() + 1);
+    }
+    return target.getTime();
+  };
+
+  useEffect(() => {
+    if (!nextClaimTime) return;
+
+    const interval = setInterval(() => {
+      const now = Date.now();
+      const diff = nextClaimTime - now;
+
+      if (diff <= 0) {
+        setNextClaimTime(null); // Timer habis, tombol muncul lagi
+        clearInterval(interval);
+      } else {
+        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
+        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
+        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
+        setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+      }
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [nextClaimTime]);
 
   const getProvider = () => {
     if ((sdk as any).wallet?.ethProvider) return (sdk as any).wallet.ethProvider;
@@ -50,7 +90,7 @@ function App() {
             const [connectedAddress] = await client.requestAddresses();
             if (connectedAddress) setAddress(connectedAddress);
           } catch (e) {
-            console.log("Auto-connect needed");
+            console.log("Auto-connect info: Manual connect needed");
           }
         }
         sdk.actions.ready();
@@ -75,6 +115,7 @@ function App() {
     setIsClaiming(true); setTxHash(null); setErrorMsg(null);
     
     try {
+      // 1. Minta Signature ke Backend
       const response = await fetch('/api/claim', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -82,8 +123,17 @@ function App() {
       });
 
       const data = await response.json();
-      if (!data.success) throw new Error("Server verification failed");
 
+      // Jika Backend menolak (Limit Habis), aktifkan Timer
+      if (!data.success) {
+        if (data.error && data.error.includes("Daily limit")) {
+           setNextClaimTime(calculateNextReset()); // Aktifkan Timer
+           throw new Error("You already claimed today! Come back at 08:00 AM WITA.");
+        }
+        throw new Error(data.error || "Server error");
+      }
+
+      // 2. Eksekusi Smart Contract
       const provider = getProvider();
       const client = createWalletClient({ chain: base, transport: custom(provider) });
       
@@ -91,7 +141,7 @@ function App() {
         account: address as `0x${string}`,
         address: CONTRACT_ADDRESS,
         abi: ABI,
-        functionName: 'claim',
+        functionName: 'claimSecure',
         args: [BigInt(data.amount), BigInt(data.nonce), data.signature],
       });
 
@@ -102,12 +152,15 @@ function App() {
       await publicClient.waitForTransactionReceipt({ hash });
       
       alert("Success! 10 DEGEN Secured & Claimed.");
+      
+      // Sukses Klaim -> Aktifkan Timer
+      setNextClaimTime(calculateNextReset());
 
     } catch (error: any) {
-      console.error(error);
+      console.error("Claim failed:", error);
       if (error.message.includes("Signature")) setErrorMsg("Security check failed.");
-      else if (error.message.includes("Nonce")) setErrorMsg("You already claimed.");
-      else setErrorMsg("Claim failed. Try again.");
+      else if (error.message.includes("already claimed")) setErrorMsg(error.message); // Pesan dari timer
+      else setErrorMsg("Claim failed or rejected.");
     } finally { setIsClaiming(false); }
   };
 
@@ -158,7 +211,14 @@ function App() {
               <button onClick={handleConnect} className="w-full group flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200">
                 <Zap className="w-5 h-5" /><span>Connect Farcaster Wallet</span>
               </button>
+            ) : nextClaimTime ? (
+              // --- TAMPILAN JIKA SEDANG COOLDOWN (TIMER) ---
+              <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed">
+                <Clock className="w-5 h-5 animate-pulse" />
+                <span>Next: {timeLeft}</span>
+              </button>
             ) : (
+              // --- TAMPILAN NORMAL (TOMBOL CLAIM) ---
               <button onClick={handleClaim} disabled={isClaiming} className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02] animate-pulse">
                 {isClaiming ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}<span>Claim 10 DEGEN</span>
               </button>
