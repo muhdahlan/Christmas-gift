@@ -1,24 +1,21 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Gift, ExternalLink, Plus, Coins, Lock, Loader2, Zap } from 'lucide-react';
-import sdk, { type Context } from '@farcaster/frame-sdk';
+import { Gift, ExternalLink, Plus, Coins, Loader2, Zap } from 'lucide-react';
+import sdk from '@farcaster/frame-sdk';
 import { createWalletClient, custom, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
-const CONTRACT_ADDRESS = "0x4595b08d4694268333a8946ff7fd18d9a98d31f9";
+const CONTRACT_ADDRESS = "0x410f69e4753429950bd66a3bfc12129257571df9";
 
 const ABI = [
   {
-    "inputs": [],
+    "inputs": [
+      { "internalType": "uint256", "name": "amount", "type": "uint256" },
+      { "internalType": "uint256", "name": "nonce", "type": "uint256" },
+      { "internalType": "bytes", "name": "signature", "type": "bytes" }
+    ],
     "name": "claim",
     "outputs": [],
     "stateMutability": "nonpayable",
-    "type": "function"
-  },
-  {
-    "inputs": [{ "internalType": "address", "name": "user", "type": "address" }],
-    "name": "canClaim",
-    "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
-    "stateMutability": "view",
     "type": "function"
   }
 ];
@@ -28,12 +25,8 @@ function App() {
   const [context, setContext] = useState<any>(); 
   const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   const [added, setAdded] = useState(false);
-  
   const [address, setAddress] = useState<string | null>(null);
   const [isClaiming, setIsClaiming] = useState(false);
-  const [canClaimNow, setCanClaimNow] = useState(false);
-  const [timeUntilReset, setTimeUntilReset] = useState<number>(0);
-  
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
@@ -42,30 +35,6 @@ function App() {
     if (typeof window !== 'undefined' && (window as any).ethereum) return (window as any).ethereum;
     return null;
   };
-
-  const calculateTimeUntilReset = () => {
-    const now = new Date();
-    const nextReset = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1, 0, 0, 0));
-    const diffSeconds = Math.floor((nextReset.getTime() - now.getTime()) / 1000);
-    return diffSeconds > 0 ? diffSeconds : 0;
-  };
-
-  const checkContractStatus = useCallback(async (userAddress: string) => {
-    try {
-      const publicClient = createPublicClient({ chain: base, transport: http() });
-      const result = await publicClient.readContract({
-        address: CONTRACT_ADDRESS,
-        abi: ABI,
-        functionName: 'canClaim',
-        args: [userAddress]
-      }) as boolean;
-      
-      setCanClaimNow(result);
-      if (!result) setTimeUntilReset(calculateTimeUntilReset());
-    } catch (error) {
-      console.error("Error reading contract:", error);
-    }
-  }, []);
 
   useEffect(() => {
     const load = async () => {
@@ -79,19 +48,16 @@ function App() {
           try {
             const client = createWalletClient({ chain: base, transport: custom(provider) });
             const [connectedAddress] = await client.requestAddresses();
-            if (connectedAddress) {
-              setAddress(connectedAddress);
-              checkContractStatus(connectedAddress);
-            }
+            if (connectedAddress) setAddress(connectedAddress);
           } catch (e) {
-            console.log("Auto-connect info: Manual connect needed");
+            console.log("Auto-connect needed");
           }
         }
         sdk.actions.ready();
       } catch (err) { sdk.actions.ready(); }
     };
     if (sdk && !isSDKLoaded) { setIsSDKLoaded(true); load(); }
-  }, [isSDKLoaded, checkContractStatus]);
+  }, [isSDKLoaded]);
 
   const handleConnect = async () => {
     setErrorMsg(null);
@@ -101,42 +67,52 @@ function App() {
       const client = createWalletClient({ chain: base, transport: custom(provider) });
       const [connectedAddress] = await client.requestAddresses();
       setAddress(connectedAddress);
-      await checkContractStatus(connectedAddress);
     } catch (error) { setErrorMsg("Connection failed. Please retry."); }
   };
 
   const handleClaim = async () => {
     if (!address) return;
     setIsClaiming(true); setTxHash(null); setErrorMsg(null);
-    const provider = getProvider();
     
     try {
+      const response = await fetch('/api/claim', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ userAddress: address }),
+      });
+
+      const data = await response.json();
+      if (!data.success) throw new Error("Server verification failed");
+
+      const provider = getProvider();
       const client = createWalletClient({ chain: base, transport: custom(provider) });
+      
       const { request } = await createPublicClient({ chain: base, transport: http() }).simulateContract({
         account: address as `0x${string}`,
         address: CONTRACT_ADDRESS,
         abi: ABI,
         functionName: 'claim',
+        args: [BigInt(data.amount), BigInt(data.nonce), data.signature],
       });
 
       const hash = await client.writeContract(request);
       setTxHash(hash);
+      
       const publicClient = createPublicClient({ chain: base, transport: http() });
       await publicClient.waitForTransactionReceipt({ hash });
       
-      checkContractStatus(address);
-      alert("Success! Daily DEGEN claimed.");
+      alert("Success! 10 DEGEN Secured & Claimed.");
+
     } catch (error: any) {
-      console.error("Claim failed:", error);
-      if (error.message.includes("AlreadyClaimed")) setErrorMsg("Already claimed today! Come back at 8 AM.");
-      else if (error.message.includes("Insufficient")) setErrorMsg("Santa is out of gifts (Contract Empty).");
-      else setErrorMsg("Claim failed. Ensure you have ETH on Base.");
+      console.error(error);
+      if (error.message.includes("Signature")) setErrorMsg("Security check failed.");
+      else if (error.message.includes("Nonce")) setErrorMsg("You already claimed.");
+      else setErrorMsg("Claim failed. Try again.");
     } finally { setIsClaiming(false); }
   };
 
-  // --- UPDATED TEXT WITH "DAILY" ---
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`I just claimed 10 $DEGEN! 🎁\n\nClaim yours daily here 👇`);
+    const text = encodeURIComponent(`I just claimed 10 $DEGEN! 🎁\n\nSecure & Anti-Bot. Claim yours here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
@@ -157,20 +133,6 @@ function App() {
     }, 200);
     return () => clearInterval(interval);
   }, []);
-
-  useEffect(() => {
-    if (!canClaimNow) {
-      const timer = setInterval(() => setTimeUntilReset(calculateTimeUntilReset()), 1000);
-      return () => clearInterval(timer);
-    }
-  }, [canClaimNow]);
-
-  const formatTime = (seconds: number) => {
-    const h = Math.floor(seconds / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    return `${h}h ${m}m ${s}s`;
-  };
 
   return (
     <div className="min-h-screen w-full bg-gradient-to-b from-red-900 via-red-800 to-red-950 flex items-center justify-center overflow-hidden relative font-['Poppins'] text-white">
@@ -196,13 +158,9 @@ function App() {
               <button onClick={handleConnect} className="w-full group flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200">
                 <Zap className="w-5 h-5" /><span>Connect Farcaster Wallet</span>
               </button>
-            ) : !canClaimNow ? (
-               <button disabled className="w-full group flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-lg cursor-not-allowed">
-                <Lock className="w-5 h-5" /><span>Reset in: {formatTime(timeUntilReset)}</span>
-              </button>
             ) : (
               <button onClick={handleClaim} disabled={isClaiming} className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02] animate-pulse">
-                {isClaiming ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}<span>Claim Daily Reward</span>
+                {isClaiming ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}<span>Claim 10 DEGEN</span>
               </button>
             )}
 
