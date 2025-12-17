@@ -133,9 +133,9 @@ function App() {
             if (data.error?.includes("claimed")) {
                const reset = calculateNextReset();
                if (type === 'daily') setNextDaily(reset); else setNextBonus(reset);
-               throw new Error(`Already claimed! Resets 08:20 UTC.`); 
+               throw new Error("Already claimed today!");
             }
-            throw new Error(data.error || "Transaction Error");
+            throw new Error(data.error || "Error");
         }
 
         const provider = getProvider();
@@ -166,7 +166,7 @@ function App() {
   };
 
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`Doing nothing and claiming your daily 15 $DEGEN\n\nMade by @0xpocky Claim here 👇`);
+    const text = encodeURIComponent(`Doing nothing and claiming your daily $DEGEN\n\nMade by @0xpocky\n\n👇 Claim here`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
