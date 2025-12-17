@@ -166,7 +166,7 @@ function App() {
   };
 
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`Doing nothing and claiming your daily $DEGEN\n\nMade by @0xpocky\n\n👇 Claim here`);
+    const text = encodeURIComponent(`Doing nothing and claiming your daily 15 $DEGEN\n\nMade by @0xpocky Claim here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
