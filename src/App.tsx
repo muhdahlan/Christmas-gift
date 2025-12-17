@@ -1,15 +1,13 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock, UserPlus } from 'lucide-react';
-import sdk, { type Context } from '@farcaster/frame-sdk';
+import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock, UserPlus, Star } from 'lucide-react';
+import sdk from '@farcaster/frame-sdk';
 import { createWalletClient, custom, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 
-// --- CONFIG ---
-const CONTRACT_ADDRESS = "0x410f69e4753429950bd66a3bfc12129257571df9";
+const CONTRACT_ADDRESS = "0x410f69e4753429950bd66a3bfc12129257571df9"; 
 const DEV_PROFILE_URL = "https://warpcast.com/0xpocky"; 
 
-const ABI = [
-  {
+const ABI = [{
     "inputs": [
       { "internalType": "uint256", "name": "amount", "type": "uint256" },
       { "internalType": "uint256", "name": "nonce", "type": "uint256" },
@@ -19,63 +17,67 @@ const ABI = [
     "outputs": [],
     "stateMutability": "nonpayable",
     "type": "function"
-  }
-];
+}];
 
 function App() {
   const [snowflakes, setSnowflakes] = useState<number[]>([]);
   const [context, setContext] = useState<any>(); 
-  const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   const [added, setAdded] = useState(false);
-  
   const [address, setAddress] = useState<string | null>(null);
-  const [isClaiming, setIsClaiming] = useState(false);
+  const [hasFollowed, setHasFollowed] = useState(false);
+
+  const [loadingDaily, setLoadingDaily] = useState(false);
+  const [loadingBonus, setLoadingBonus] = useState(false);
+  
+  const [nextDaily, setNextDaily] = useState<number | null>(null);
+  const [nextBonus, setNextBonus] = useState<number | null>(null);
+  
+  const [timeDaily, setTimeDaily] = useState<string>("");
+  const [timeBonus, setTimeBonus] = useState<string>("");
+
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const [nextClaimTime, setNextClaimTime] = useState<number | null>(null);
-  const [timeLeft, setTimeLeft] = useState<string>("");
-
-  const [hasFollowed, setHasFollowed] = useState(false);
-
   useEffect(() => {
     const checkFollow = localStorage.getItem("hasFollowedDev");
-    if (checkFollow === "true") {
-      setHasFollowed(true);
-    }
+    if (checkFollow === "true") setHasFollowed(true);
   }, []);
 
   const calculateNextReset = () => {
     const now = new Date();
     const target = new Date(now);
-    target.setUTCHours(0, 0, 0, 0); 
-    
-    if (now.getTime() >= target.getTime()) {
-      target.setUTCDate(target.getUTCDate() + 1);
-    }
+    target.setUTCHours(8, 20, 0, 0); 
+    if (now.getTime() >= target.getTime()) target.setUTCDate(target.getUTCDate() + 1);
     return target.getTime();
   };
 
   useEffect(() => {
-    if (!nextClaimTime) return;
-
+    if (!nextDaily) return;
     const interval = setInterval(() => {
-      const now = Date.now();
-      const diff = nextClaimTime - now;
-
-      if (diff <= 0) {
-        setNextClaimTime(null);
-        clearInterval(interval);
-      } else {
-        const hours = Math.floor((diff % (1000 * 60 * 60 * 24)) / (1000 * 60 * 60));
-        const minutes = Math.floor((diff % (1000 * 60 * 60)) / (1000 * 60));
-        const seconds = Math.floor((diff % (1000 * 60)) / 1000);
-        setTimeLeft(`${hours}h ${minutes}m ${seconds}s`);
+      const diff = nextDaily - Date.now();
+      if (diff <= 0) { setNextDaily(null); clearInterval(interval); }
+      else {
+        const h = Math.floor((diff % 86400000) / 3600000);
+        const m = Math.floor((diff % 3600000) / 60000);
+        setTimeDaily(`${h}h ${m}m`);
       }
     }, 1000);
-
     return () => clearInterval(interval);
-  }, [nextClaimTime]);
+  }, [nextDaily]);
+
+  useEffect(() => {
+    if (!nextBonus) return;
+    const interval = setInterval(() => {
+      const diff = nextBonus - Date.now();
+      if (diff <= 0) { setNextBonus(null); clearInterval(interval); }
+      else {
+        const h = Math.floor((diff % 86400000) / 3600000);
+        const m = Math.floor((diff % 3600000) / 60000);
+        setTimeBonus(`${h}h ${m}m`);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [nextBonus]);
 
   const getProvider = () => {
     if ((sdk as any).wallet?.ethProvider) return (sdk as any).wallet.ethProvider;
@@ -84,108 +86,93 @@ function App() {
   };
 
   useEffect(() => {
+    sdk.actions.ready();
     const load = async () => {
-      try {
         const context = await sdk.context;
         setContext(context);
         if (context?.client?.added) setAdded(true);
-
         const provider = getProvider();
         if (provider) {
-          try {
-            const client = createWalletClient({ chain: base, transport: custom(provider) });
-            const [connectedAddress] = await client.requestAddresses();
-            if (connectedAddress) setAddress(connectedAddress);
-          } catch (e) {
-            console.log("Auto-connect info: Manual connect needed");
-          }
+            try {
+                const client = createWalletClient({ chain: base, transport: custom(provider) });
+                const [addr] = await client.requestAddresses();
+                setAddress(addr);
+            } catch (e) {}
         }
-        sdk.actions.ready();
-      } catch (err) { sdk.actions.ready(); }
     };
-    if (sdk && !isSDKLoaded) { setIsSDKLoaded(true); load(); }
-  }, [isSDKLoaded]);
+    load();
+  }, []);
 
   const handleConnect = async () => {
-    setErrorMsg(null);
     const provider = getProvider();
-    if (!provider) { setErrorMsg("Wallet not found. Open in Warpcast Mobile."); return; }
-    try {
-      const client = createWalletClient({ chain: base, transport: custom(provider) });
-      const [connectedAddress] = await client.requestAddresses();
-      setAddress(connectedAddress);
-    } catch (error) { setErrorMsg("Connection failed. Please retry."); }
+    if (!provider) return;
+    const client = createWalletClient({ chain: base, transport: custom(provider) });
+    const [addr] = await client.requestAddresses();
+    setAddress(addr);
   };
 
   const handleFollowDev = useCallback(() => {
     sdk.actions.openUrl(DEV_PROFILE_URL);
     localStorage.setItem("hasFollowedDev", "true");
-    setTimeout(() => {
-        setHasFollowed(true);
-    }, 1000); 
+    setTimeout(() => setHasFollowed(true), 1000); 
   }, []);
 
-  const handleClaim = async () => {
+  const executeClaim = async (type: 'daily' | 'bonus') => {
     if (!address) return;
-    setIsClaiming(true); setTxHash(null); setErrorMsg(null);
-    
+    if (type === 'daily') setLoadingDaily(true); else setLoadingBonus(true);
+    setTxHash(null); setErrorMsg(null);
+
     try {
-      // Reverted: No FID sent, just address
-      const response = await fetch('/api/claim', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userAddress: address }),
-      });
+        const res = await fetch('/api/claim', {
+            method: 'POST',
+            body: JSON.stringify({ userAddress: address, type })
+        });
+        const data = await res.json();
 
-      const data = await response.json();
-
-      if (!data.success) {
-        if (data.error && (data.error.includes("Daily limit") || data.error.includes("claimed"))) {
-           setNextClaimTime(calculateNextReset()); 
-           throw new Error("You already claimed today!"); 
+        if (!data.success) {
+            if (data.error?.includes("claimed")) {
+               const reset = calculateNextReset();
+               if (type === 'daily') setNextDaily(reset); else setNextBonus(reset);
+               throw new Error(`Already claimed! Resets 08:20 UTC.`); 
+            }
+            throw new Error(data.error || "Transaction Error");
         }
-        throw new Error(data.error || "Server error");
-      }
 
-      const provider = getProvider();
-      const client = createWalletClient({ chain: base, transport: custom(provider) });
-      
-      const { request } = await createPublicClient({ chain: base, transport: http() }).simulateContract({
-        account: address as `0x${string}`,
-        address: CONTRACT_ADDRESS,
-        abi: ABI,
-        functionName: 'claim',
-        args: [BigInt(data.amount), BigInt(data.nonce), data.signature],
-      });
+        const provider = getProvider();
+        const client = createWalletClient({ chain: base, transport: custom(provider) });
+        
+        const { request } = await createPublicClient({ chain: base, transport: http() }).simulateContract({
+            account: address as `0x${string}`,
+            address: CONTRACT_ADDRESS,
+            abi: ABI,
+            functionName: 'claim',
+            args: [BigInt(data.amount), BigInt(data.nonce), data.signature]
+        });
 
-      const hash = await client.writeContract(request);
-      setTxHash(hash);
-      
-      const publicClient = createPublicClient({ chain: base, transport: http() });
-      await publicClient.waitForTransactionReceipt({ hash });
-      
-      alert("Success! 10 DEGEN Secured & Claimed.");
-      setNextClaimTime(calculateNextReset());
+        const hash = await client.writeContract(request);
+        setTxHash(hash);
+        
+        const publicClient = createPublicClient({ chain: base, transport: http() });
+        await publicClient.waitForTransactionReceipt({ hash });
+        
+        alert(`Success! ${type === 'daily' ? '10' : '5'} DEGEN Sent.`);
+        if (type === 'daily') setNextDaily(calculateNextReset()); else setNextBonus(calculateNextReset());
 
-    } catch (error: any) {
-      console.error("Claim failed:", error);
-      if (error.message.includes("Signature")) setErrorMsg("Security check failed.");
-      else if (error.message.includes("already claimed")) setErrorMsg(error.message); 
-      else setErrorMsg(error.message || "Claim failed.");
-    } finally { setIsClaiming(false); }
+    } catch (err: any) {
+        setErrorMsg(err.message);
+    } finally {
+        if (type === 'daily') setLoadingDaily(false); else setLoadingBonus(false);
+    }
   };
 
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`I just claimed 10 $DEGEN on Christmas Gift\n\nClaim yours daily here 👇`);
+    const text = encodeURIComponent(`Doing nothing and claiming your daily $DEGEN\n\nMade by @0xpocky\n\n👇 Claim here`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
 
   const handleAddApp = useCallback(async () => {
-    try {
-      const result = await sdk.actions.addFrame();
-      if (result.notificationDetails) setAdded(true);
-    } catch (error) { console.error(error); }
+    try { await sdk.actions.addFrame(); setAdded(true); } catch (e) {}
   }, []);
 
   useEffect(() => {
@@ -212,39 +199,53 @@ function App() {
           <p className="text-xl font-semibold mb-6 tracking-wide">{context?.user?.username ? `Hi @${context.user.username}!` : ''}</p>
           
           {errorMsg && <div className="mb-4 p-2 bg-red-500/50 rounded-lg text-sm text-white font-medium animate-pulse">{errorMsg}</div>}
-
-          <div className="border-t border-white/20 pt-6 mt-4 mb-8">
-            <p className="text-yellow-200 font-medium text-lg leading-relaxed">Connect wallet and claim your REAL DEGEN tokens (Base).</p>
-          </div>
+          
+          <div className="mb-6"></div>
 
           <div className="flex flex-col gap-3">
             {!address ? (
               <button onClick={handleConnect} className="w-full group flex items-center justify-center gap-2 bg-blue-600 hover:bg-blue-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200">
-                <Zap className="w-5 h-5" /><span>Connect Farcaster Wallet</span>
+                <Zap className="w-5 h-5" /><span>Connect Wallet</span>
               </button>
             ) : !hasFollowed ? (
               <button onClick={handleFollowDev} className="w-full group flex items-center justify-center gap-2 bg-purple-600 hover:bg-purple-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 animate-pulse">
                 <UserPlus className="w-5 h-5" /><span>Follow Dev to Unlock</span>
               </button>
-            ) : nextClaimTime ? (
-              <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed">
-                <Clock className="w-5 h-5 animate-pulse" />
-                <span>Next: {timeLeft}</span>
-              </button>
             ) : (
-              <button onClick={handleClaim} disabled={isClaiming} className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02] animate-pulse">
-                {isClaiming ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}<span>Claim 10 DEGEN</span>
-              </button>
+              <>
+                {nextDaily ? (
+                  <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed">
+                    <Clock className="w-5 h-5" /><span>Next 10: {timeDaily}</span>
+                  </button>
+                ) : (
+                  <button onClick={() => executeClaim('daily')} disabled={loadingDaily || loadingBonus} className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02]">
+                    {loadingDaily ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}
+                    <span>Claim 10 DEGEN</span>
+                  </button>
+                )}
+
+                {nextBonus ? (
+                  <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed">
+                    <Clock className="w-5 h-5" /><span>Next Bonus: {timeBonus}</span>
+                  </button>
+                ) : (
+                  <button onClick={() => executeClaim('bonus')} disabled={loadingDaily || loadingBonus} className="w-full group flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02]">
+                    {loadingBonus ? <Loader2 className="w-5 h-5 animate-spin" /> : <Star className="w-5 h-5" />}
+                    <span>Claim 5 BONUS</span>
+                  </button>
+                )}
+              </>
             )}
 
-            {txHash && <a href={`https://basescan.org/tx/${txHash}`} target="_blank" rel="noreferrer" className="text-xs text-blue-300 underline mb-2">View Transaction on Basescan</a>}
+            {txHash && <a href={`https://basescan.org/tx/${txHash}`} target="_blank" rel="noreferrer" className="text-xs text-blue-300 underline mb-2">View Transaction</a>}
 
             <button onClick={handleWarpcastShare} className="w-full group flex items-center justify-center gap-2 bg-[#855DCD] hover:bg-[#7c54c2] text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200">
               <ExternalLink className="w-5 h-5" /><span>Share</span>
             </button>
+            
             {!added && (
               <button onClick={handleAddApp} className="w-full group flex items-center justify-center gap-2 bg-white/10 hover:bg-white/20 border border-white/30 text-white font-semibold py-3 px-6 rounded-xl transition-all duration-200">
-                <Plus className="w-5 h-5" /><span>Save Gift to Apps</span>
+                <Plus className="w-5 h-5" /><span>Save Gift</span>
               </button>
             )}
           </div>
