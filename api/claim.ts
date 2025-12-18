@@ -7,7 +7,6 @@ import { kv } from '@vercel/kv';
 const MIN_QUOTIENT_SCORE = 0.5;
 
 // --- DUMMY MODE SWITCH ---
-// Set to 'false' ONLY after adding the real QUOTIENT_API_KEY in Vercel.
 const ENABLE_DUMMY_MODE = true;
 // ----------------------------------
 
@@ -75,10 +74,12 @@ export async function POST(request: Request) {
         }
 
         if (userScore < MIN_QUOTIENT_SCORE) {
+             // VVV--- BAGIAN PESAN ERROR YANG DIUBAH ---VVV
              return new Response(JSON.stringify({ 
                 success: false, 
-                error: `Reputation too low. Your Quotient Score is ${userScore.toFixed(2)}. Minimum required is ${MIN_QUOTIENT_SCORE} to ensure quality users.` 
+                error: `Reputation too low. Your Quotient Score is low. Minimum required is ${MIN_QUOTIENT_SCORE} to ensure quality users.` 
             }), { status: 403 });
+            // ^^^--------------------------------------^^^
         }
 
     } catch (apiErr: any) {
@@ -86,7 +87,9 @@ export async function POST(request: Request) {
         if (apiErr.message.includes("Score: 0")) {
              return new Response(JSON.stringify({ 
                 success: false, 
-                error: `Reputation too low. Your Quotient Score is 0. Minimum required is ${MIN_QUOTIENT_SCORE}.` 
+                // VVV--- BAGIAN PESAN ERROR YANG DIUBAH ---VVV
+                error: `Reputation too low. Your Quotient Score is low. Minimum required is ${MIN_QUOTIENT_SCORE} to ensure quality users.` 
+                // ^^^--------------------------------------^^^
             }), { status: 403 });
         }
         return new Response(JSON.stringify({ 
