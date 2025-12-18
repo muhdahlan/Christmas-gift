@@ -3,9 +3,14 @@ import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem
 import { base } from 'viem/chains';
 import { kv } from '@vercel/kv';
 
+// --- NEYNAR REQUIREMENTS CONFIG ---
+const MIN_FOLLOWERS = 500;
+const MIN_NEYNAR_SCORE = 0.4;
+// ----------------------------------
+
 const REWARDS = {
-    daily: 10000000000000000000n, // 10 DEGEN
-    bonus: 5000000000000000000n   // 5 DEGEN
+    daily: 69000000000000000000n, // 69 DEGEN
+    bonus: 15000000000000000000n  // 15 DEGEN
 };
 
 export async function POST(request: Request) {
@@ -15,13 +20,72 @@ export async function POST(request: Request) {
     const type = (body.type || 'daily') as keyof typeof REWARDS;
     
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
+    const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
 
     if (!userAddress || !SIGNER_PRIVATE_KEY || !REWARDS[type]) {
-      return new Response(JSON.stringify({ error: 'Invalid Request' }), { status: 400 });
+      return new Response(JSON.stringify({ error: 'Invalid Request Config' }), { status: 400 });
+    }
+
+    if (!NEYNAR_API_KEY) {
+        console.error("CRITICAL: NEYNAR_API_KEY is missing in environment variables.");
+        return new Response(JSON.stringify({ error: 'Server configuration error. Contact dev.' }), { status: 500 });
     }
 
     const rewardAmount = REWARDS[type];
 
+    // ==================================================================
+    // 1. NEYNAR VERIFICATION
+    // ==================================================================
+    try {
+        const neynarResponse = await fetch(
+            `https://api.neynar.com/v2/farcaster/user/by_address?address=${userAddress}`,
+            {
+                method: 'GET',
+                headers: {
+                    'accept': 'application/json',
+                    'api_key': NEYNAR_API_KEY
+                }
+            }
+        );
+
+        if (!neynarResponse.ok) {
+            console.error(`Neynar API Error Status: ${neynarResponse.status}`);
+            throw new Error("Failed to connect to Farcaster validation service.");
+        }
+
+        const neynarData = await neynarResponse.json();
+        
+        let fUser = neynarData.user;
+        if (!fUser && Array.isArray(neynarData) && neynarData.length > 0) {
+            fUser = neynarData[0];
+        }
+
+        if (!fUser) {
+             return new Response(JSON.stringify({ 
+                success: false, 
+                error: 'This wallet is not linked to a Farcaster profile.' 
+            }), { status: 403 });
+        }
+
+        const followerCount = fUser.follower_count || 0;
+        const neynarScore = fUser.experimental?.neynar_score || 0;
+
+        if (followerCount < MIN_FOLLOWERS || neynarScore < MIN_NEYNAR_SCORE) {
+             return new Response(JSON.stringify({ 
+                success: false, 
+                error: `Requirements not met. Need: ${MIN_FOLLOWERS}+ Followers & ${MIN_NEYNAR_SCORE} Neynar Score. You have: ${followerCount} followers, Score: ${neynarScore.toFixed(2)}` 
+            }), { status: 403 });
+        }
+
+    } catch (apiErr: any) {
+        console.error("Neynar Verification Failed:", apiErr.message);
+        return new Response(JSON.stringify({ 
+            success: false, 
+            error: 'Unable to verify social requirements at this time. Please try again later.' 
+        }), { status: 500 });
+    }
+
+    // 2. Anti-Bot Contract Check
     const publicClient = createPublicClient({ chain: base, transport: http() });
     const bytecode = await publicClient.getBytecode({ address: userAddress as `0x${string}` });
     if (bytecode) {
@@ -31,11 +95,13 @@ export async function POST(request: Request) {
         }), { status: 403 });
     }
 
+    // 3. Lock & Limit
     const lockKey = `lock:${type}:${userAddress}`;
     if (!await kv.set(lockKey, 'processing', { nx: true, ex: 10 })) {
-        return new Response(JSON.stringify({ error: 'Too many requests.' }), { status: 429 });
+        return new Response(JSON.stringify({ error: 'Too many requests. Slow down.' }), { status: 429 });
     }
 
+    // 4. Daily Reset Check (08:20 UTC)
     const now = new Date();
     const resetTime = new Date(now);
     resetTime.setUTCHours(8, 20, 0, 0); 
@@ -53,6 +119,7 @@ export async function POST(request: Request) {
         }), { status: 429 });
     }
 
+    // 5. Generate Signature
     const nonce = BigInt(Date.now());
     const account = privateKeyToAccount(SIGNER_PRIVATE_KEY);
 
