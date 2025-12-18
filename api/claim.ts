@@ -74,12 +74,10 @@ export async function POST(request: Request) {
         }
 
         if (userScore < MIN_QUOTIENT_SCORE) {
-             // VVV--- BAGIAN PESAN ERROR YANG DIUBAH ---VVV
              return new Response(JSON.stringify({ 
                 success: false, 
                 error: `Reputation too low. Your Quotient Score is low. Minimum required is ${MIN_QUOTIENT_SCORE} to ensure quality users.` 
             }), { status: 403 });
-            // ^^^--------------------------------------^^^
         }
 
     } catch (apiErr: any) {
@@ -87,9 +85,7 @@ export async function POST(request: Request) {
         if (apiErr.message.includes("Score: 0")) {
              return new Response(JSON.stringify({ 
                 success: false, 
-                // VVV--- BAGIAN PESAN ERROR YANG DIUBAH ---VVV
                 error: `Reputation too low. Your Quotient Score is low. Minimum required is ${MIN_QUOTIENT_SCORE} to ensure quality users.` 
-                // ^^^--------------------------------------^^^
             }), { status: 403 });
         }
         return new Response(JSON.stringify({ 
