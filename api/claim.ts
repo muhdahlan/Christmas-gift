@@ -3,9 +3,12 @@ import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem
 import { base } from 'viem/chains';
 import { kv } from '@vercel/kv';
 
-// --- NEYNAR REQUIREMENTS CONFIG ---
-const MIN_FOLLOWERS = 500;
-const MIN_NEYNAR_SCORE = 0.4;
+// --- QUOTIENT REPUTATION CONFIG ---
+const MIN_QUOTIENT_SCORE = 0.5;
+
+// --- DUMMY MODE SWITCH ---
+// Set to 'false' ONLY after adding the real QUOTIENT_API_KEY in Vercel.
+const ENABLE_DUMMY_MODE = true;
 // ----------------------------------
 
 const REWARDS = {
@@ -20,78 +23,74 @@ export async function POST(request: Request) {
     const type = (body.type || 'daily') as keyof typeof REWARDS;
     
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
-    const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
+    const QUOTIENT_API_KEY = process.env.QUOTIENT_API_KEY;
 
     if (!userAddress || !SIGNER_PRIVATE_KEY || !REWARDS[type]) {
       return new Response(JSON.stringify({ error: 'Invalid Request Config' }), { status: 400 });
     }
 
-    if (!NEYNAR_API_KEY) {
-        console.error("CRITICAL ERROR: NEYNAR_API_KEY is missing/undefined in environment variables.");
+    if (!ENABLE_DUMMY_MODE && !QUOTIENT_API_KEY) {
+        console.error("CRITICAL ERROR: QUOTIENT_API_KEY is missing in environment variables. Cannot run in live mode.");
         return new Response(JSON.stringify({ error: 'Server configuration error. Contact dev.' }), { status: 500 });
     }
 
     const rewardAmount = REWARDS[type];
 
     // ==================================================================
-    // --- NEW DEBUGGING LOGS ---
-    const keyDebug = NEYNAR_API_KEY ? `${NEYNAR_API_KEY.substring(0, 5)}...[HIDDEN]` : 'UNDEFINED/EMPTY';
-    console.log(`[DEBUG] Starting Neynar check for ${userAddress}. Using API Key starting with: ${keyDebug}`);
-    // ==================================================================
-
-    // 1. NEYNAR VERIFICATION
+    // 1. QUOTIENT REPUTATION CHECK (WITH DUMMY MODE)
     // ==================================================================
     try {
-        console.log("[DEBUG] Sending fetch request to Neynar...");
-        const neynarResponse = await fetch(
-            `https://api.neynar.com/v2/farcaster/user/by_address?address=${userAddress}`,
-            {
-                method: 'GET',
-                headers: {
-                    'accept': 'application/json',
-                    'api_key': NEYNAR_API_KEY
+        let userScore = 0;
+
+        if (ENABLE_DUMMY_MODE) {
+            console.log(`[DEBUG] DUMMY MODE ACTIVE For address: ${userAddress}`);
+            console.log("[DEBUG] Skipping real Quotient API call.");
+            userScore = 0.8; 
+            console.log(`[DEBUG] Assigning dummy score: ${userScore}`);
+        } else {
+            console.log(`[LIVE] Checking real Quotient Score for address: ${userAddress}`);
+            const quotientResponse = await fetch(
+                `https://api.quotient.social/v1/reputation/user/${userAddress}`,
+                {
+                    method: 'GET',
+                    headers: {
+                        'accept': 'application/json',
+                        'x-api-key': QUOTIENT_API_KEY!
+                    }
                 }
+            );
+
+            if (!quotientResponse.ok) {
+                console.error(`Quotient API Error Status: ${quotientResponse.status}`);
+                if (quotientResponse.status === 404) {
+                     throw new Error("User not found in reputation database (Score: 0)");
+                }
+                throw new Error("Failed to connect to reputation service.");
             }
-        );
 
-        console.log(`[DEBUG] Neynar response status: ${neynarResponse.status}`);
-
-        if (!neynarResponse.ok) {
-            console.error(`Neynar API Error Status: ${neynarResponse.status}`);
-            throw new Error("Failed to connect to Farcaster validation service.");
-        }
-        
-        console.log("[DEBUG] Neynar connection successful. Parsing data...");
-        const neynarData = await neynarResponse.json();
-        
-        let fUser = neynarData.user;
-        if (!fUser && Array.isArray(neynarData) && neynarData.length > 0) {
-            fUser = neynarData[0];
+            const data = await quotientResponse.json();
+            userScore = data.quotient_score || 0;
+            console.log(`[LIVE] User real Quotient Score: ${userScore}`);
         }
 
-        if (!fUser) {
+        if (userScore < MIN_QUOTIENT_SCORE) {
              return new Response(JSON.stringify({ 
                 success: false, 
-                error: 'This wallet is not linked to a Farcaster profile.' 
-            }), { status: 403 });
-        }
-
-        const followerCount = fUser.follower_count || 0;
-        const neynarScore = fUser.experimental?.neynar_score || 0;
-        console.log(`[DEBUG] User data: Followers=${followerCount}, Score=${neynarScore}`);
-
-        if (followerCount < MIN_FOLLOWERS || neynarScore < MIN_NEYNAR_SCORE) {
-             return new Response(JSON.stringify({ 
-                success: false, 
-                error: `Requirements not met. Need: ${MIN_FOLLOWERS}+ Followers & ${MIN_NEYNAR_SCORE} Neynar Score. You have: ${followerCount} followers, Score: ${neynarScore.toFixed(2)}` 
+                error: `Reputation too low. Your Quotient Score is ${userScore.toFixed(2)}. Minimum required is ${MIN_QUOTIENT_SCORE} to ensure quality users.` 
             }), { status: 403 });
         }
 
     } catch (apiErr: any) {
-        console.error("Neynar Verification Failed (CATCH BLOCK):", apiErr.message);
+        console.error("Reputation Check Failed:", apiErr.message);
+        if (apiErr.message.includes("Score: 0")) {
+             return new Response(JSON.stringify({ 
+                success: false, 
+                error: `Reputation too low. Your Quotient Score is 0. Minimum required is ${MIN_QUOTIENT_SCORE}.` 
+            }), { status: 403 });
+        }
         return new Response(JSON.stringify({ 
             success: false, 
-            error: 'Unable to verify social requirements at this time. Please try again later.' 
+            error: 'Unable to verify social reputation at this time. Please try again later.' 
         }), { status: 500 });
     }
 
