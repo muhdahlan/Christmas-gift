@@ -27,16 +27,22 @@ export async function POST(request: Request) {
     }
 
     if (!NEYNAR_API_KEY) {
-        console.error("CRITICAL: NEYNAR_API_KEY is missing in environment variables.");
+        console.error("CRITICAL ERROR: NEYNAR_API_KEY is missing/undefined in environment variables.");
         return new Response(JSON.stringify({ error: 'Server configuration error. Contact dev.' }), { status: 500 });
     }
 
     const rewardAmount = REWARDS[type];
 
     // ==================================================================
+    // --- NEW DEBUGGING LOGS ---
+    const keyDebug = NEYNAR_API_KEY ? `${NEYNAR_API_KEY.substring(0, 5)}...[HIDDEN]` : 'UNDEFINED/EMPTY';
+    console.log(`[DEBUG] Starting Neynar check for ${userAddress}. Using API Key starting with: ${keyDebug}`);
+    // ==================================================================
+
     // 1. NEYNAR VERIFICATION
     // ==================================================================
     try {
+        console.log("[DEBUG] Sending fetch request to Neynar...");
         const neynarResponse = await fetch(
             `https://api.neynar.com/v2/farcaster/user/by_address?address=${userAddress}`,
             {
@@ -48,11 +54,14 @@ export async function POST(request: Request) {
             }
         );
 
+        console.log(`[DEBUG] Neynar response status: ${neynarResponse.status}`);
+
         if (!neynarResponse.ok) {
             console.error(`Neynar API Error Status: ${neynarResponse.status}`);
             throw new Error("Failed to connect to Farcaster validation service.");
         }
-
+        
+        console.log("[DEBUG] Neynar connection successful. Parsing data...");
         const neynarData = await neynarResponse.json();
         
         let fUser = neynarData.user;
@@ -69,6 +78,7 @@ export async function POST(request: Request) {
 
         const followerCount = fUser.follower_count || 0;
         const neynarScore = fUser.experimental?.neynar_score || 0;
+        console.log(`[DEBUG] User data: Followers=${followerCount}, Score=${neynarScore}`);
 
         if (followerCount < MIN_FOLLOWERS || neynarScore < MIN_NEYNAR_SCORE) {
              return new Response(JSON.stringify({ 
@@ -78,7 +88,7 @@ export async function POST(request: Request) {
         }
 
     } catch (apiErr: any) {
-        console.error("Neynar Verification Failed:", apiErr.message);
+        console.error("Neynar Verification Failed (CATCH BLOCK):", apiErr.message);
         return new Response(JSON.stringify({ 
             success: false, 
             error: 'Unable to verify social requirements at this time. Please try again later.' 

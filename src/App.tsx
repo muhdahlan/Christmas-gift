@@ -130,10 +130,10 @@ function App() {
         const data = await res.json();
 
         if (!data.success) {
-            if (data.error?.includes("claimed")) {
+            if (data.error?.toLowerCase().includes("already claimed")) {
                const reset = calculateNextReset();
                if (type === 'daily') setNextDaily(reset); else setNextBonus(reset);
-               throw new Error("Already claimed today!");
+               throw new Error("Already claimed today! Resets 08:20 UTC.");
             }
             throw new Error(data.error || "Error");
         }
@@ -155,7 +155,6 @@ function App() {
         const publicClient = createPublicClient({ chain: base, transport: http() });
         await publicClient.waitForTransactionReceipt({ hash });
         
-        // Updated alert text based on type
         alert(`Success! ${type === 'daily' ? '69' : '15'} DEGEN Sent.`);
         if (type === 'daily') setNextDaily(calculateNextReset()); else setNextBonus(calculateNextReset());
 
@@ -167,8 +166,7 @@ function App() {
   };
 
   const handleWarpcastShare = useCallback(() => {
-    // Updated share text
-    const text = encodeURIComponent(`Doing nothing and claiming your daily 69 $DEGEN\n\nMade by @0xpocky Claim here 👇`);
+    const text = encodeURIComponent(`Doing nothing and claiming your daily 84 $DEGEN\n\nMade by @0xpocky Claim here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
