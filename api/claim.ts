@@ -45,7 +45,8 @@ export async function POST(request: Request) {
         if (ENABLE_DUMMY_MODE) {
             console.log(`[DEBUG] DUMMY MODE ACTIVE For address: ${userAddress}`);
             console.log("[DEBUG] Skipping real Quotient API call.");
-            userScore = 0.8; 
+            // Setting low score to test FAILURE scenario
+            userScore = 0.2; 
             console.log(`[DEBUG] Assigning dummy score: ${userScore}`);
         } else {
             console.log(`[LIVE] Checking real Quotient Score for address: ${userAddress}`);
