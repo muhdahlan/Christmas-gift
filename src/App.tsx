@@ -123,10 +123,18 @@ function App() {
     setTxHash(null); setErrorMsg(null);
 
     try {
+        const userFid = context?.user?.fid;
+        
         const res = await fetch('/api/claim', {
             method: 'POST',
-            body: JSON.stringify({ userAddress: address, type })
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                userAddress: address, 
+                type: type,
+                fid: userFid
+            })
         });
+
         const data = await res.json();
 
         if (!data.success) {

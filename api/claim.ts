@@ -4,8 +4,8 @@ import { base } from 'viem/chains';
 import { kv } from '@vercel/kv';
 
 const REWARDS = {
-    daily: 10000000000000000000n, // 10 DEGEN
-    bonus: 5000000000000000000n   // 5 DEGEN
+    daily: 10000000000000000000n, 
+    bonus: 5000000000000000000n
 };
 
 export async function POST(request: Request) {
@@ -13,6 +13,7 @@ export async function POST(request: Request) {
     const body = await request.json();
     const userAddress = (body.userAddress || "").toLowerCase();
     const type = (body.type || 'daily') as keyof typeof REWARDS;
+    const fid = body.fid || "unknown";
     
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
 
@@ -22,54 +23,51 @@ export async function POST(request: Request) {
 
     const rewardAmount = REWARDS[type];
 
-    // 1. Anti-Bot Contract Check
     const publicClient = createPublicClient({ chain: base, transport: http() });
     const bytecode = await publicClient.getBytecode({ address: userAddress as `0x${string}` });
     if (bytecode) {
-        return new Response(JSON.stringify({ 
-            success: false, 
-            error: 'Security Alert: Smart Contracts not allowed!' 
-        }), { status: 403 });
+        return new Response(JSON.stringify({ success: false, error: 'Security Alert: Smart Contracts not allowed!' }), { status: 403 });
     }
 
-    // 2. Lock & Limit
     const lockKey = `lock:${type}:${userAddress}`;
     if (!await kv.set(lockKey, 'processing', { nx: true, ex: 10 })) {
         return new Response(JSON.stringify({ error: 'Too many requests. Slow down.' }), { status: 429 });
     }
 
-    // 3. Daily Reset Check (08:20 UTC)
     const now = new Date();
     const resetTime = new Date(now);
     resetTime.setUTCHours(8, 20, 0, 0); 
-
     if (now.getTime() < resetTime.getTime()) {
         resetTime.setUTCDate(resetTime.getUTCDate() - 1);
     }
 
     const lastClaim = await kv.get<number>(`claim:${type}:${userAddress}`);
-
     if (lastClaim && lastClaim > resetTime.getTime()) {
-        return new Response(JSON.stringify({ 
-            success: false, 
-            error: `You already claimed ${type.toUpperCase()} today!` 
-        }), { status: 429 });
+        return new Response(JSON.stringify({ success: false, error: `You already claimed ${type.toUpperCase()} today!` }), { status: 429 });
     }
 
-    // 4. Generate Signature
     const nonce = BigInt(Date.now());
     const account = privateKeyToAccount(SIGNER_PRIVATE_KEY);
-
     const messageHash = keccak256(
       encodePacked(
         ['address', 'uint256', 'uint256'],
         [userAddress as `0x${string}`, rewardAmount, nonce]
       )
     );
-
     const signature = await account.signMessage({ message: { raw: toBytes(messageHash) } });
     
     await kv.set(`claim:${type}:${userAddress}`, Date.now());
+
+    const logEntry = JSON.stringify({
+        timestamp: new Date().toISOString(),
+        type: type,
+        fid: fid,
+        address: userAddress,
+        amount: rewardAmount.toString()
+    });
+
+    await kv.lpush('claim_logs', logEntry);
+    await kv.ltrim('claim_logs', 0, 4999);
 
     return new Response(JSON.stringify({
       success: true,
