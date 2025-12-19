@@ -141,7 +141,7 @@ function App() {
             if (data.error?.toLowerCase().includes("already claimed")) {
                const reset = calculateNextReset();
                if (type === 'daily') setNextDaily(reset); else setNextBonus(reset);
-               throw new Error("Already claimed today! Resets 08:20 UTC.");
+               throw new Error("Already claimed today!");
             }
             throw new Error(data.error || "Error");
         }
