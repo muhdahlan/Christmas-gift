@@ -118,7 +118,7 @@ function App() {
   }, []);
 
   const executeClaim = async (type: 'daily' | 'bonus') => {
-    if (!address) return;
+    if (!address) return; 
     if (type === 'daily') setLoadingDaily(true); else setLoadingBonus(true);
     setTxHash(null); setErrorMsg(null);
 
@@ -139,7 +139,7 @@ function App() {
         }
 
         const provider = getProvider();
-        const client = createWalletClient({ chain: base, transport: custom(provider) });
+        const client = createWalletClient({ chain: base, transport: custom(provider!) });
         
         const { request } = await createPublicClient({ chain: base, transport: http() }).simulateContract({
             account: address as `0x${string}`,
@@ -155,7 +155,7 @@ function App() {
         const publicClient = createPublicClient({ chain: base, transport: http() });
         await publicClient.waitForTransactionReceipt({ hash });
         
-        alert(`Success! ${type === 'daily' ? '69' : '15'} DEGEN Sent.`);
+        alert(`Success! ${type === 'daily' ? '10' : '5'} DEGEN Sent.`);
         if (type === 'daily') setNextDaily(calculateNextReset()); else setNextBonus(calculateNextReset());
 
     } catch (err: any) {
@@ -166,7 +166,7 @@ function App() {
   };
 
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`Doing nothing and claiming your daily 84 $DEGEN\n\nMade by @0xpocky Claim here 👇`);
+    const text = encodeURIComponent(`Do nothing and claim your daily $DEGEN\n\nMade by @0xpocky Claim here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
@@ -215,12 +215,12 @@ function App() {
               <>
                 {nextDaily ? (
                   <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed">
-                    <Clock className="w-5 h-5" /><span>Next 69: {timeDaily}</span>
+                    <Clock className="w-5 h-5" /><span>Next 10: {timeDaily}</span>
                   </button>
                 ) : (
-                  <button onClick={() => executeClaim('daily')} disabled={loadingDaily || loadingBonus} className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02]">
+                  <button onClick={() => executeClaim('daily')} disabled={loadingDaily || loadingBonus} className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 hover:scale-[1.02]">
                     {loadingDaily ? <Loader2 className="w-5 h-5 animate-spin" /> : <Coins className="w-5 h-5" />}
-                    <span>Claim 69 DEGEN</span>
+                    <span>Claim 10 DEGEN</span>
                   </button>
                 )}
 
@@ -229,9 +229,9 @@ function App() {
                     <Clock className="w-5 h-5" /><span>Next Bonus: {timeBonus}</span>
                   </button>
                 ) : (
-                  <button onClick={() => executeClaim('bonus')} disabled={loadingDaily || loadingBonus} className="w-full group flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 transform hover:scale-[1.02]">
+                  <button onClick={() => executeClaim('bonus')} disabled={loadingDaily || loadingBonus} className="w-full group flex items-center justify-center gap-2 bg-pink-600 hover:bg-pink-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 hover:scale-[1.02]">
                     {loadingBonus ? <Loader2 className="w-5 h-5 animate-spin" /> : <Star className="w-5 h-5" />}
-                    <span>Claim 15 BONUS</span>
+                    <span>Claim 5 BONUS</span>
                   </button>
                 )}
               </>
