@@ -2,7 +2,6 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem';
 import { base, arbitrum, celo } from 'viem/chains';
 import { kv } from '@vercel/kv';
-import axios from 'axios';
 
 const CHAIN_IDS = {
   BASE: 8453,
@@ -27,90 +26,25 @@ const getClient = (chainId: number) => {
   }
 }
 
-// Helper function to create standard JSON responses
-function jsonResponse(data: any, status: number = 200) {
-  return new Response(JSON.stringify(data), {
-    status: status,
-    headers: {
-      'Content-Type': 'application/json',
-    },
-  });
-}
-
 export async function POST(request: Request) {
   try {
     const body = await request.json();
     const userAddress = (body.userAddress || "").toLowerCase();
-    // Ensure FID is a string or null if missing
-    const fid = body.fid ? String(body.fid) : null;
+    const fid = body.fid || "unknown";
     const chainId = body.chainId || CHAIN_IDS.BASE;
 
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
 
-    // --- START: BASIC INPUT VALIDATION ---
-    if (!userAddress || !SIGNER_PRIVATE_KEY || !REWARDS[chainId]) {
-      return jsonResponse({ error: 'Invalid Request Config' }, 400);
-    }
-
-    if (!fid) {
-        return jsonResponse({ success: false, error: "Farcaster FID not found." }, 400);
-    }
-    // --- END: BASIC INPUT VALIDATION ---
-
-
-    // --- START: NEYNAR SCORE CHECK (NEW) ---
-    const NEYNAR_API_KEY = process.env.NEYNAR_API_KEY;
-
-    if (!NEYNAR_API_KEY) {
-      console.error("NEYNAR_API_KEY not set in environment variables.");
-      // Fail safe: reject claim if server config is wrong
-      return jsonResponse({ success: false, error: "Server configuration error." }, 500);
-    }
-
-    try {
-      console.log(`Checking Neynar score for FID: ${fid}`);
-      const neynarResponse = await axios.get(
-        `https://api.neynar.com/v2/farcaster/user?fid=${fid}`,
-        {
-          headers: {
-            'api_key': NEYNAR_API_KEY,
-            'accept': 'application/json'
-          }
-        }
-      );
-
-      // Get score. Use optional chaining (?.) and nullish coalescing (??)
-      // If user has no reputation score yet, default to 0.5 (new user default)
-      const userScore = neynarResponse.data.result.user.reputation?.score ?? 0.5;
-      console.log(`Neynar score for FID ${fid} is: ${userScore}`);
-
-      // Check if score is below the threshold of 0.3
-      if (userScore < 0.3) {
-        console.warn(`Claim denied for FID ${fid}. Score ${userScore} is too low.`);
-        return jsonResponse({
-          success: false,
-          error: 'Sorry, your Neynar score is too low (< 0.3) to claim this reward. Increase your Farcaster activity!',
-        }, 403); // 403 Forbidden
-      }
-
-      // If code reaches here, user score is >= 0.3. Proceed!
-
-    } catch (neynarError: any) {
-      // Handle Neynar API errors (e.g., API down, rate limit, FID not found)
-      console.error("Neynar API Error:", neynarError.response?.data || neynarError.message);
-      // Fail safe: reject claim if we can't verify the score
-      return jsonResponse({ success: false, error: "Failed to verify Neynar score. Please try again later." }, 500);
-    }
-    // --- END: NEYNAR SCORE CHECK ---
-
-
-    // --- PREVIOUS CLAIM LOGIC STARTS HERE ---
     const now = Date.now();
     if (chainId === CHAIN_IDS.ARBITRUM && now < ARB_UNLOCK_DATE.getTime()) {
-      return jsonResponse({ success: false, error: 'Arbitrum rewards are locked until tomorrow!' }, 403);
+      return new Response(JSON.stringify({ success: false, error: 'Arbitrum rewards are locked until tomorrow!' }), { status: 403 });
     }
     if (chainId === CHAIN_IDS.CELO && now < CELO_UNLOCK_DATE.getTime()) {
-      return jsonResponse({ success: false, error: 'Celo rewards are locked until day after tomorrow!' }, 403);
+      return new Response(JSON.stringify({ success: false, error: 'Celo rewards are locked until day after tomorrow!' }), { status: 403 });
+    }
+
+    if (!userAddress || !SIGNER_PRIVATE_KEY || !REWARDS[chainId]) {
+      return new Response(JSON.stringify({ error: 'Invalid Request Config' }), { status: 400 });
     }
 
     const rewardAmount = REWARDS[chainId];
@@ -118,22 +52,13 @@ export async function POST(request: Request) {
     const publicClient = getClient(chainId);
     const bytecode = await publicClient.getBytecode({ address: userAddress as `0x${string}` });
     if (bytecode) {
-      return jsonResponse({ success: false, error: 'Security Alert: Smart Contracts not allowed!' }, 403);
+      return new Response(JSON.stringify({ success: false, error: 'Security Alert: Smart Contracts not allowed!' }), { status: 403 });
     }
 
     const lockKey = `lock:${chainId}:${userAddress}`;
-    // Use try-catch for KV operations for safety
-    try {
-        const isLocked = await kv.set(lockKey, 'processing', { nx: true, ex: 10 });
-        if (!isLocked) {
-             return jsonResponse({ error: 'Too many requests. Slow down.' }, 429);
-        }
-    } catch (kvError) {
-         console.error("KV Lock Error:", kvError);
-         // If KV fails, it might be safer to deny temporarily
-         return jsonResponse({ error: 'Database error. Please try again.' }, 500);
+    if (!await kv.set(lockKey, 'processing', { nx: true, ex: 10 })) {
+      return new Response(JSON.stringify({ error: 'Too many requests. Slow down.' }), { status: 429 });
     }
-
 
     const resetTime = new Date(now);
     resetTime.setUTCHours(8, 20, 0, 0);
@@ -144,7 +69,7 @@ export async function POST(request: Request) {
     const claimKey = `claim:${chainId}:${userAddress}`;
     const lastClaim = await kv.get<number>(claimKey);
     if (lastClaim && lastClaim > resetTime.getTime()) {
-      return jsonResponse({ success: false, error: `Already claimed on this chain today!` }, 429);
+      return new Response(JSON.stringify({ success: false, error: `Already claimed on this chain today!` }), { status: 429 });
     }
 
     const nonce = BigInt(now);
@@ -168,19 +93,18 @@ export async function POST(request: Request) {
       amount: rewardAmount.toString()
     });
 
-    // Await KV operations on Vercel functions to ensure completion.
     await kv.lpush('claim_logs', logEntry);
     await kv.ltrim('claim_logs', 0, 4999);
 
-    return jsonResponse({
+    return new Response(JSON.stringify({
       success: true,
       amount: rewardAmount.toString(),
       nonce: nonce.toString(),
       signature: signature,
-    }, 200);
+    }), { status: 200 });
 
   } catch (error) {
-    console.error("Unhandled API Error:", error);
-    return jsonResponse({ error: 'Internal Server Error' }, 500);
+    console.error(error);
+    return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 });
   }
 }
