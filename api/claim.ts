@@ -9,8 +9,10 @@ const CHAIN_IDS = {
   CELO: 42220
 };
 
-const ARB_UNLOCK_DATE = new Date(Date.UTC(2025, 11, 22, 8, 20, 0));
-const CELO_UNLOCK_DATE = new Date(Date.UTC(2025, 11, 23, 8, 20, 0));
+const ARB_LOCK_START_DATE = new Date(Date.UTC(2025, 11, 24, 8, 20, 0));
+const UNLOCK_DATE_NEXT_WEEK = new Date(Date.UTC(2025, 11, 29, 8, 20, 0));
+
+const LOCKED_MESSAGE = 'Claim next week.';
 
 const REWARDS = {
   [CHAIN_IDS.BASE]: 10000000000000000000n,
@@ -29,33 +31,38 @@ const getClient = (chainId: number) => {
 export async function POST(request: Request) {
   try {
     const body = await request.json();
-    const userAddress = (body.userAddress || "").toLowerCase();
+    const userAddress = body.userAddress;
     const fid = body.fid || "unknown";
     const chainId = body.chainId || CHAIN_IDS.BASE;
 
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
-
     const now = Date.now();
-    if (chainId === CHAIN_IDS.ARBITRUM && now < ARB_UNLOCK_DATE.getTime()) {
-      return new Response(JSON.stringify({ success: false, error: 'Arbitrum rewards are locked until tomorrow!' }), { status: 403 });
+
+    if (chainId === CHAIN_IDS.ARBITRUM && now >= ARB_LOCK_START_DATE.getTime() && now < UNLOCK_DATE_NEXT_WEEK.getTime()) {
+      return new Response(JSON.stringify({ success: false, error: LOCKED_MESSAGE }), { status: 403 });
     }
-    if (chainId === CHAIN_IDS.CELO && now < CELO_UNLOCK_DATE.getTime()) {
-      return new Response(JSON.stringify({ success: false, error: 'Celo rewards are locked until day after tomorrow!' }), { status: 403 });
+
+    if (chainId === CHAIN_IDS.CELO && now < UNLOCK_DATE_NEXT_WEEK.getTime()) {
+      return new Response(JSON.stringify({ success: false, error: LOCKED_MESSAGE }), { status: 403 });
     }
 
     if (!userAddress || !SIGNER_PRIVATE_KEY || !REWARDS[chainId]) {
       return new Response(JSON.stringify({ error: 'Invalid Request Config' }), { status: 400 });
     }
 
-    const rewardAmount = REWARDS[chainId];
+    if (!userAddress.startsWith("0x") || userAddress.length !== 42) {
+        return new Response(JSON.stringify({ error: 'Invalid user address format' }), { status: 400 });
+    }
 
+    const userAddressLower = userAddress.toLowerCase();
+    const rewardAmount = REWARDS[chainId];
     const publicClient = getClient(chainId);
     const bytecode = await publicClient.getBytecode({ address: userAddress as `0x${string}` });
     if (bytecode) {
       return new Response(JSON.stringify({ success: false, error: 'Security Alert: Smart Contracts not allowed!' }), { status: 403 });
     }
 
-    const lockKey = `lock:${chainId}:${userAddress}`;
+    const lockKey = `lock:${chainId}:${userAddressLower}`;
     if (!await kv.set(lockKey, 'processing', { nx: true, ex: 10 })) {
       return new Response(JSON.stringify({ error: 'Too many requests. Slow down.' }), { status: 429 });
     }
@@ -66,7 +73,7 @@ export async function POST(request: Request) {
       resetTime.setUTCDate(resetTime.getUTCDate() - 1);
     }
 
-    const claimKey = `claim:${chainId}:${userAddress}`;
+    const claimKey = `claim:${chainId}:${userAddressLower}`;
     const lastClaim = await kv.get<number>(claimKey);
     if (lastClaim && lastClaim > resetTime.getTime()) {
       return new Response(JSON.stringify({ success: false, error: `Already claimed on this chain today!` }), { status: 429 });
@@ -74,6 +81,7 @@ export async function POST(request: Request) {
 
     const nonce = BigInt(now);
     const account = privateKeyToAccount(SIGNER_PRIVATE_KEY);
+
     const messageHash = keccak256(
       encodePacked(
         ['address', 'uint256', 'uint256'],
@@ -89,7 +97,7 @@ export async function POST(request: Request) {
       chainId: chainId,
       type: 'daily',
       fid: fid,
-      address: userAddress,
+      address: userAddressLower,
       amount: rewardAmount.toString()
     });
 
