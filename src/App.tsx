@@ -1,13 +1,21 @@
 import React, { useEffect, useState, useCallback } from 'react';
 import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock, UserPlus, Star, Layers, Lock } from 'lucide-react';
 import sdk from '@farcaster/frame-sdk';
-import { createWalletClient, custom, createPublicClient, http } from 'viem';
+import { createWalletClient, custom, createPublicClient, http, Chain } from 'viem';
 import { base, arbitrum, celo } from 'viem/chains';
 
-const ARB_UNLOCK_TIME = new Date(Date.UTC(2025, 11, 22, 8, 20, 0)).getTime();
-const CELO_UNLOCK_TIME = new Date(Date.UTC(2025, 11, 23, 8, 20, 0)).getTime();
+const ARB_LOCK_START_TIME = new Date(Date.UTC(2025, 11, 24, 8, 20, 0)).getTime();
+const UNLOCK_TIME_NEXT_WEEK = new Date(Date.UTC(2025, 11, 29, 8, 20, 0)).getTime();
 
-const CHAIN_CONFIG = {
+interface ChainConfigEntry {
+    name: string;
+    token: string;
+    amountDisplay: string;
+    address: string;
+    chainDef: Chain;
+}
+
+const CHAIN_CONFIG: { [key: number]: ChainConfigEntry } = {
     [base.id]: { name: 'Base', token: 'DEGEN', amountDisplay: '10', address: "0x410f69e4753429950bd66a3bfc12129257571df9", chainDef: base },
     [arbitrum.id]: { name: 'Arbitrum', token: 'ARB', amountDisplay: '0.1', address: "0xc5e582aB8C9f9A6C3eD612CADdB06E5814aa18EC", chainDef: arbitrum },
     [celo.id]: { name: 'Celo', token: 'CELO', amountDisplay: '0.1', address: "0xc5e582aB8C9f9A6C3eD612CADdB06E5814aa18EC", chainDef: celo }
@@ -45,7 +53,7 @@ function App() {
     const checkFollow = localStorage.getItem("hasFollowedDev");
     if (checkFollow === "true") setHasFollowed(true);
     
-    const timer = setInterval(() => setCurrentTime(Date.now()), 60000);
+    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -71,7 +79,8 @@ function App() {
       else {
         const h = Math.floor((diff % 86400000) / 3600000);
         const m = Math.floor((diff % 3600000) / 60000);
-        setTimerDisplay(`${h}h ${m}m`);
+        const s = Math.floor((diff % 60000) / 1000);
+        setTimerDisplay(`${h}h ${m}m ${s}s`);
       }
     }, 1000);
     return () => clearInterval(interval);
@@ -149,7 +158,7 @@ function App() {
                setNextClaimTime(calculateNextReset());
                throw new Error(`Already claimed on ${targetConfig.name} today!`);
             }
-            if (data.error?.toLowerCase().includes("locked")) {
+            if (data.error?.toLowerCase().includes("next week")) {
                 throw new Error(data.error);
             }
             throw new Error(data.error || "Error");
@@ -202,16 +211,20 @@ function App() {
 
   const ClaimButton = ({ chainId, Icon }: { chainId: number, Icon: React.ElementType }) => {
       const config = CHAIN_CONFIG[chainId];
-      const isLocked = (chainId === arbitrum.id && currentTime < ARB_UNLOCK_TIME) || 
-                       (chainId === celo.id && currentTime < CELO_UNLOCK_TIME);
+      
+      const isCeloLocked = chainId === celo.id && currentTime < UNLOCK_TIME_NEXT_WEEK;
+      const isArbLocked = chainId === arbitrum.id && currentTime >= ARB_LOCK_START_TIME && currentTime < UNLOCK_TIME_NEXT_WEEK;
+      const isLocked = isCeloLocked || isArbLocked;
+
       const isActiveChain = selectedChainId === chainId;
       const showTimer = isActiveChain && nextClaimTime;
       const showLoading = isActiveChain && isLoading;
 
       if (isLocked) {
           return (
-              <button disabled className="w-full flex items-center justify-center gap-2 bg-black/20 text-white/40 font-bold py-3 px-6 rounded-xl cursor-not-allowed border border-white/10">
-                  <Lock className="w-5 h-5" /><span>Claim {config.token} (Locked)</span>
+              <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-500/50 text-white/70 font-bold py-3 px-6 rounded-xl cursor-not-allowed border border-white/10">
+                  <Lock className="w-5 h-5" />
+                  <span>Claim open next week</span>
               </button>
           );
       }
@@ -295,6 +308,9 @@ function App() {
               </button>
             )}
           </div>
+        </div>
+        <div className="text-center text-white/50 text-sm mt-6">
+          Built with ❤️ by <a href="https://warpcast.com/0xpocky" target="_blank" rel="noreferrer" className="hover:text-white/80 underline">@0xpocky</a>
         </div>
       </div>
     </div>
