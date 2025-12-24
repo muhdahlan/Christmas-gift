@@ -21,8 +21,10 @@ const getClient = (chainId: number) => {
 }
 
 export async function POST(request: Request) {
+  let body: any = null;
+
   try {
-    const body = await request.json();
+    body = await request.json();
     const userAddress = body.userAddress;
     const fid = body.fid || "unknown";
     const chainId = body.chainId || CHAIN_IDS.BASE;
