@@ -1,11 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock, UserPlus, Star, Layers, Lock } from 'lucide-react';
+import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock, UserPlus, Star } from 'lucide-react';
 import sdk from '@farcaster/frame-sdk';
 import { createWalletClient, custom, createPublicClient, http, Chain } from 'viem';
-import { base, arbitrum, celo } from 'viem/chains';
-
-const ARB_LOCK_START_TIME = new Date(Date.UTC(2025, 11, 24, 8, 20, 0)).getTime();
-const UNLOCK_TIME_NEXT_WEEK = new Date(Date.UTC(2025, 11, 29, 8, 20, 0)).getTime();
+import { base, arbitrum } from 'viem/chains';
 
 interface ChainConfigEntry {
     name: string;
@@ -17,8 +14,7 @@ interface ChainConfigEntry {
 
 const CHAIN_CONFIG: { [key: number]: ChainConfigEntry } = {
     [base.id]: { name: 'Base', token: 'DEGEN', amountDisplay: '10', address: "0x410f69e4753429950bd66a3bfc12129257571df9", chainDef: base },
-    [arbitrum.id]: { name: 'Arbitrum', token: 'ARB', amountDisplay: '0.1', address: "0xc5e582aB8C9f9A6C3eD612CADdB06E5814aa18EC", chainDef: arbitrum },
-    [celo.id]: { name: 'Celo', token: 'CELO', amountDisplay: '0.1', address: "0xc5e582aB8C9f9A6C3eD612CADdB06E5814aa18EC", chainDef: celo }
+    [arbitrum.id]: { name: 'Arbitrum', token: 'ARB', amountDisplay: '0.1', address: "0xc5e582aB8C9f9A6C3eD612CADdB06E5814aa18EC", chainDef: arbitrum }
 };
 
 const ABI = [{
@@ -45,16 +41,12 @@ function App() {
   const [timerDisplay, setTimerDisplay] = useState<string>("");
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [currentTime, setCurrentTime] = useState(Date.now());
 
   const activeChainConfig = CHAIN_CONFIG[selectedChainId];
 
   useEffect(() => {
     const checkFollow = localStorage.getItem("hasFollowedDev");
     if (checkFollow === "true") setHasFollowed(true);
-    
-    const timer = setInterval(() => setCurrentTime(Date.now()), 1000);
-    return () => clearInterval(timer);
   }, []);
 
   useEffect(() => {
@@ -158,9 +150,6 @@ function App() {
                setNextClaimTime(calculateNextReset());
                throw new Error(`Already claimed on ${targetConfig.name} today!`);
             }
-            if (data.error?.toLowerCase().includes("next week")) {
-                throw new Error(data.error);
-            }
             throw new Error(data.error || "Error");
         }
 
@@ -200,7 +189,7 @@ function App() {
   };
 
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`Claiming my daily crypto across Base, Arbitrum, and Celo! 🚀\n\nMade by @0xpocky. Try it here 👇`);
+    const text = encodeURIComponent(`Claiming my daily crypto across Base and Arbitrum! 🚀\n\nMade by @0xpocky. Try it here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
@@ -212,22 +201,9 @@ function App() {
   const ClaimButton = ({ chainId, Icon }: { chainId: number, Icon: React.ElementType }) => {
       const config = CHAIN_CONFIG[chainId];
       
-      const isCeloLocked = chainId === celo.id && currentTime < UNLOCK_TIME_NEXT_WEEK;
-      const isArbLocked = chainId === arbitrum.id && currentTime >= ARB_LOCK_START_TIME && currentTime < UNLOCK_TIME_NEXT_WEEK;
-      const isLocked = isCeloLocked || isArbLocked;
-
       const isActiveChain = selectedChainId === chainId;
       const showTimer = isActiveChain && nextClaimTime;
       const showLoading = isActiveChain && isLoading;
-
-      if (isLocked) {
-          return (
-              <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-500/50 text-white/70 font-bold py-3 px-6 rounded-xl cursor-not-allowed border border-white/10">
-                  <Lock className="w-5 h-5" />
-                  <span>Claim open next week</span>
-              </button>
-          );
-      }
 
       if (showTimer) {
           return (
@@ -238,7 +214,7 @@ function App() {
       }
 
       return (
-          <button onClick={() => executeClaim(chainId)} disabled={isLoading} className={`w-full group flex items-center justify-center gap-2 font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 hover:scale-[1.02] ${chainId === base.id ? 'bg-blue-600 hover:bg-blue-500' : chainId === celo.id ? 'bg-green-600 hover:bg-green-500' : 'bg-pink-600 hover:bg-pink-500'}`}>
+          <button onClick={() => executeClaim(chainId)} disabled={isLoading} className={`w-full group flex items-center justify-center gap-2 font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 hover:scale-[1.02] ${chainId === base.id ? 'bg-blue-600 hover:bg-blue-500' : 'bg-pink-600 hover:bg-pink-500'}`}>
               {showLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Icon className="w-5 h-5" />}
               <span>Claim {config.amountDisplay} {config.token}</span>
           </button>
@@ -282,14 +258,13 @@ function App() {
             ) : (
               <>
                 <ClaimButton chainId={base.id} Icon={Coins} />
-                <ClaimButton chainId={celo.id} Icon={Layers} />
                 <ClaimButton chainId={arbitrum.id} Icon={Star} />
               </>
             )}
 
             {txHash && (
                 <a 
-                    href={selectedChainId === base.id ? `https://basescan.org/tx/${txHash}` : selectedChainId === arbitrum.id ? `https://arbiscan.io/tx/${txHash}` : `https://celoscan.io/tx/${txHash}`} 
+                    href={selectedChainId === base.id ? `https://basescan.org/tx/${txHash}` : `https://arbiscan.io/tx/${txHash}`} 
                     target="_blank" 
                     rel="noreferrer" 
                     className="text-xs text-blue-300 underline mb-2"

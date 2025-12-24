@@ -1,29 +1,21 @@
 import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem';
-import { base, arbitrum, celo } from 'viem/chains';
+import { base, arbitrum } from 'viem/chains';
 import { kv } from '@vercel/kv';
 
 const CHAIN_IDS = {
   BASE: 8453,
-  ARBITRUM: 42161,
-  CELO: 42220
+  ARBITRUM: 42161
 };
 
-const ARB_LOCK_START_DATE = new Date(Date.UTC(2025, 11, 24, 8, 20, 0));
-const UNLOCK_DATE_NEXT_WEEK = new Date(Date.UTC(2025, 11, 29, 8, 20, 0));
-
-const LOCKED_MESSAGE = 'Claim next week.';
-
 const REWARDS = {
-  [CHAIN_IDS.BASE]: 10000000000000000000n,
-  [CHAIN_IDS.ARBITRUM]: 100000000000000000n,
-  [CHAIN_IDS.CELO]: 100000000000000000n
+  [CHAIN_IDS.BASE]: 10000000000000000000n, // 10 DEGEN
+  [CHAIN_IDS.ARBITRUM]: 100000000000000000n  // 0.1 ARB
 };
 
 const getClient = (chainId: number) => {
   switch (chainId) {
     case CHAIN_IDS.ARBITRUM: return createPublicClient({ chain: arbitrum, transport: http() });
-    case CHAIN_IDS.CELO: return createPublicClient({ chain: celo, transport: http() });
     default: return createPublicClient({ chain: base, transport: http() });
   }
 }
@@ -38,16 +30,8 @@ export async function POST(request: Request) {
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
     const now = Date.now();
 
-    if (chainId === CHAIN_IDS.ARBITRUM && now >= ARB_LOCK_START_DATE.getTime() && now < UNLOCK_DATE_NEXT_WEEK.getTime()) {
-      return new Response(JSON.stringify({ success: false, error: LOCKED_MESSAGE }), { status: 403 });
-    }
-
-    if (chainId === CHAIN_IDS.CELO && now < UNLOCK_DATE_NEXT_WEEK.getTime()) {
-      return new Response(JSON.stringify({ success: false, error: LOCKED_MESSAGE }), { status: 403 });
-    }
-
     if (!userAddress || !SIGNER_PRIVATE_KEY || !REWARDS[chainId]) {
-      return new Response(JSON.stringify({ error: 'Invalid Request Config' }), { status: 400 });
+      return new Response(JSON.stringify({ error: 'Invalid Request Config or Unsupported Chain' }), { status: 400 });
     }
 
     if (!userAddress.startsWith("0x") || userAddress.length !== 42) {
@@ -57,6 +41,7 @@ export async function POST(request: Request) {
     const userAddressLower = userAddress.toLowerCase();
     const rewardAmount = REWARDS[chainId];
     const publicClient = getClient(chainId);
+    
     const bytecode = await publicClient.getBytecode({ address: userAddress as `0x${string}` });
     if (bytecode) {
       return new Response(JSON.stringify({ success: false, error: 'Security Alert: Smart Contracts not allowed!' }), { status: 403 });
@@ -76,6 +61,7 @@ export async function POST(request: Request) {
     const claimKey = `claim:${chainId}:${userAddressLower}`;
     const lastClaim = await kv.get<number>(claimKey);
     if (lastClaim && lastClaim > resetTime.getTime()) {
+      await kv.del(lockKey);
       return new Response(JSON.stringify({ success: false, error: `Already claimed on this chain today!` }), { status: 429 });
     }
 
@@ -103,6 +89,8 @@ export async function POST(request: Request) {
 
     await kv.lpush('claim_logs', logEntry);
     await kv.ltrim('claim_logs', 0, 4999);
+    
+    await kv.del(lockKey);
 
     return new Response(JSON.stringify({
       success: true,
@@ -113,6 +101,10 @@ export async function POST(request: Request) {
 
   } catch (error) {
     console.error(error);
+    if (body?.userAddress && body?.chainId) {
+       const lockKey = `lock:${body.chainId}:${body.userAddress.toLowerCase()}`;
+       await kv.del(lockKey);
+    }
     return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 });
   }
 }
