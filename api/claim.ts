@@ -1,24 +1,23 @@
 import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem';
-import { base, arbitrum } from 'viem/chains';
+import { base } from 'viem/chains';
 import { kv } from '@vercel/kv';
 
-const CHAIN_IDS = {
-  BASE: 8453,
-  ARBITRUM: 42161
-};
+const GM_CONTRACT_ADDRESS = "0x8fDc3AED01a0b12c00D480977ad16a16A87cb9E7";
+const GM_READ_ABI = [{
+    "inputs": [{ "internalType": "address", "name": "user", "type": "address" }],
+    "name": "lastGMDay",
+    "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+    "stateMutability": "view",
+    "type": "function"
+}] as const;
+
+const CHAIN_ID_BASE = 8453;
 
 const REWARDS = {
-  [CHAIN_IDS.BASE]: 10000000000000000000n, // 10 DEGEN
-  [CHAIN_IDS.ARBITRUM]: 100000000000000000n  // 0.1 ARB
+  MAIN: 10000000000000000000n, // 10 DEGEN
+  BONUS: 2000000000000000000n   // 2 DEGEN
 };
-
-const getClient = (chainId: number) => {
-  switch (chainId) {
-    case CHAIN_IDS.ARBITRUM: return createPublicClient({ chain: arbitrum, transport: http() });
-    default: return createPublicClient({ chain: base, transport: http() });
-  }
-}
 
 export async function POST(request: Request) {
   let body: any = null;
@@ -27,13 +26,13 @@ export async function POST(request: Request) {
     body = await request.json();
     const userAddress = body.userAddress;
     const fid = body.fid || "unknown";
-    const chainId = body.chainId || CHAIN_IDS.BASE;
+    const claimType = body.claimType || 'main'; 
 
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
     const now = Date.now();
 
-    if (!userAddress || !SIGNER_PRIVATE_KEY || !REWARDS[chainId]) {
-      return new Response(JSON.stringify({ error: 'Invalid Request Config or Unsupported Chain' }), { status: 400 });
+    if (!userAddress || !SIGNER_PRIVATE_KEY) {
+      return new Response(JSON.stringify({ error: 'Invalid Request Config' }), { status: 400 });
     }
 
     if (!userAddress.startsWith("0x") || userAddress.length !== 42) {
@@ -41,15 +40,37 @@ export async function POST(request: Request) {
     }
 
     const userAddressLower = userAddress.toLowerCase();
-    const rewardAmount = REWARDS[chainId];
-    const publicClient = getClient(chainId);
+    const publicClient = createPublicClient({ chain: base, transport: http() });
     
     const bytecode = await publicClient.getBytecode({ address: userAddress as `0x${string}` });
     if (bytecode) {
       return new Response(JSON.stringify({ success: false, error: 'Security Alert: Smart Contracts not allowed!' }), { status: 403 });
     }
 
-    const lockKey = `lock:${chainId}:${userAddressLower}`;
+    const currentUTCDay = Math.floor(now / 1000 / 86400);
+    const lastGMDayBigInt = await publicClient.readContract({
+        address: GM_CONTRACT_ADDRESS as `0x${string}`,
+        abi: GM_READ_ABI,
+        functionName: 'lastGMDay',
+        args: [userAddress as `0x${string}`]
+    });
+
+    if (Number(lastGMDayBigInt) !== currentUTCDay) {
+        return new Response(JSON.stringify({ success: false, error: 'You must perform the on-chain GM transaction first!' }), { status: 403 });
+    }
+
+    let rewardAmount: bigint;
+    let dbKeySuffix: string;
+
+    if (claimType === 'bonus') {
+        rewardAmount = REWARDS.BONUS;
+        dbKeySuffix = 'bonus_degen';
+    } else {
+        rewardAmount = REWARDS.MAIN;
+        dbKeySuffix = 'main_degen';
+    }
+
+    const lockKey = `lock:${dbKeySuffix}:${userAddressLower}`;
     if (!await kv.set(lockKey, 'processing', { nx: true, ex: 10 })) {
       return new Response(JSON.stringify({ error: 'Too many requests. Slow down.' }), { status: 429 });
     }
@@ -60,11 +81,12 @@ export async function POST(request: Request) {
       resetTime.setUTCDate(resetTime.getUTCDate() - 1);
     }
 
-    const claimKey = `claim:${chainId}:${userAddressLower}`;
+    const claimKey = `claim:${dbKeySuffix}:${userAddressLower}`;
     const lastClaim = await kv.get<number>(claimKey);
     if (lastClaim && lastClaim > resetTime.getTime()) {
       await kv.del(lockKey);
-      return new Response(JSON.stringify({ success: false, error: `Already claimed on this chain today!` }), { status: 429 });
+      const typeMsg = claimType === 'bonus' ? 'Bonus' : 'Main';
+      return new Response(JSON.stringify({ success: false, error: `Already claimed the ${typeMsg} reward today!` }), { status: 429 });
     }
 
     const nonce = BigInt(now);
@@ -82,8 +104,8 @@ export async function POST(request: Request) {
 
     const logEntry = JSON.stringify({
       timestamp: new Date().toISOString(),
-      chainId: chainId,
-      type: 'daily',
+      chainId: CHAIN_ID_BASE,
+      type: claimType,
       fid: fid,
       address: userAddressLower,
       amount: rewardAmount.toString()
@@ -103,8 +125,9 @@ export async function POST(request: Request) {
 
   } catch (error) {
     console.error(error);
-    if (body?.userAddress && body?.chainId) {
-       const lockKey = `lock:${body.chainId}:${body.userAddress.toLowerCase()}`;
+    if (body?.userAddress && body?.claimType) {
+       const dbKeySuffix = body.claimType === 'bonus' ? 'bonus_degen' : 'main_degen';
+       const lockKey = `lock:${dbKeySuffix}:${body.userAddress.toLowerCase()}`;
        await kv.del(lockKey);
     }
     return new Response(JSON.stringify({ error: 'Internal Server Error' }), { status: 500 });

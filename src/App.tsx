@@ -1,23 +1,30 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock, UserPlus, Star } from 'lucide-react';
+import { Gift, ExternalLink, Plus, Coins, Loader2, Zap, Clock, UserPlus, Coffee, Sparkles, Lock } from 'lucide-react';
 import sdk from '@farcaster/frame-sdk';
-import { createWalletClient, custom, createPublicClient, http, Chain } from 'viem';
-import { base, arbitrum } from 'viem/chains';
+import { createWalletClient, custom, createPublicClient, http } from 'viem';
+import { base } from 'viem/chains';
 
-interface ChainConfigEntry {
-    name: string;
-    token: string;
-    amountDisplay: string;
-    address: string;
-    chainDef: Chain;
-}
+const DEGEN_TOKEN_ADDRESS = "0x410f69e4753429950bd66a3bfc12129257571df9";
+const YOUR_OWN_GM_CONTRACT_ADDRESS = "0x8fDc3AED01a0b12c00D480977ad16a16A87cb9E7";
 
-const CHAIN_CONFIG: { [key: number]: ChainConfigEntry } = {
-    [base.id]: { name: 'Base', token: 'DEGEN', amountDisplay: '10', address: "0x410f69e4753429950bd66a3bfc12129257571df9", chainDef: base },
-    [arbitrum.id]: { name: 'Arbitrum', token: 'ARB', amountDisplay: '0.1', address: "0xc5e582aB8C9f9A6C3eD612CADdB06E5814aa18EC", chainDef: arbitrum }
-};
+const YOUR_GM_ABI = [
+    {
+        "inputs": [{ "internalType": "address", "name": "user", "type": "address" }],
+        "name": "lastGMDay",
+        "outputs": [{ "internalType": "uint256", "name": "", "type": "uint256" }],
+        "stateMutability": "view",
+        "type": "function"
+    },
+    {
+        "inputs": [],
+        "name": "gm",
+        "outputs": [],
+        "stateMutability": "nonpayable",
+        "type": "function"
+    }
+] as const;
 
-const ABI = [{
+const CLAIM_ABI = [{
     "inputs": [
       { "internalType": "uint256", "name": "amount", "type": "uint256" },
       { "internalType": "uint256", "name": "nonce", "type": "uint256" },
@@ -35,25 +42,49 @@ function App() {
   const [added, setAdded] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
   const [hasFollowed, setHasFollowed] = useState(false);
-  const [selectedChainId, setSelectedChainId] = useState<number>(base.id);
+  
   const [isLoading, setIsLoading] = useState(false);
-  const [nextClaimTime, setNextClaimTime] = useState<number | null>(null);
-  const [timerDisplay, setTimerDisplay] = useState<string>("");
   const [txHash, setTxHash] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
-  const activeChainConfig = CHAIN_CONFIG[selectedChainId];
+  const [hasGMed, setHasGMed] = useState(false);
+  const [isGMLoading, setIsGMLoading] = useState(true);
+
+  const [nextMainClaimTime, setNextMainClaimTime] = useState<number | null>(null);
+  const [nextBonusClaimTime, setNextBonusClaimTime] = useState<number | null>(null);
+  const [mainTimerDisplay, setMainTimerDisplay] = useState<string>("");
+  const [bonusTimerDisplay, setBonusTimerDisplay] = useState<string>("");
+
+  const getCurrentUTCDay = () => Math.floor(Date.now() / 1000 / 86400);
+
+  const checkGMStatus = useCallback(async (userAddr: string) => {
+    setIsGMLoading(true);
+    try {
+        const publicClient = createPublicClient({ chain: base, transport: http() });
+        const lastDayBigInt = await publicClient.readContract({
+            address: YOUR_OWN_GM_CONTRACT_ADDRESS as `0x${string}`,
+            abi: YOUR_GM_ABI,
+            functionName: 'lastGMDay',
+            args: [userAddr as `0x${string}`]
+        });
+
+        if (Number(lastDayBigInt) === getCurrentUTCDay()) {
+            setHasGMed(true);
+        } else {
+            setHasGMed(false);
+        }
+    } catch (error) {
+        console.error("Failed to check GM status:", error);
+        setHasGMed(false);
+    } finally {
+        setIsGMLoading(false);
+    }
+  }, []);
 
   useEffect(() => {
     const checkFollow = localStorage.getItem("hasFollowedDev");
     if (checkFollow === "true") setHasFollowed(true);
   }, []);
-
-  useEffect(() => {
-      setTxHash(null);
-      setErrorMsg(null);
-      setNextClaimTime(null);
-  }, [selectedChainId]);
 
   const calculateNextReset = () => {
     const now = new Date();
@@ -64,19 +95,31 @@ function App() {
   };
 
   useEffect(() => {
-    if (!nextClaimTime) return;
+    if (!nextMainClaimTime) return;
     const interval = setInterval(() => {
-      const diff = nextClaimTime - Date.now();
-      if (diff <= 0) { setNextClaimTime(null); clearInterval(interval); }
-      else {
-        const h = Math.floor((diff % 86400000) / 3600000);
-        const m = Math.floor((diff % 3600000) / 60000);
-        const s = Math.floor((diff % 60000) / 1000);
-        setTimerDisplay(`${h}h ${m}m ${s}s`);
-      }
+      const diff = nextMainClaimTime - Date.now();
+      if (diff <= 0) { setNextMainClaimTime(null); clearInterval(interval); }
+      else { setMainTimerDisplay(formatTimer(diff)); }
     }, 1000);
     return () => clearInterval(interval);
-  }, [nextClaimTime]);
+  }, [nextMainClaimTime]);
+
+  useEffect(() => {
+    if (!nextBonusClaimTime) return;
+    const interval = setInterval(() => {
+      const diff = nextBonusClaimTime - Date.now();
+      if (diff <= 0) { setNextBonusClaimTime(null); clearInterval(interval); }
+      else { setBonusTimerDisplay(formatTimer(diff)); }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [nextBonusClaimTime]);
+
+  const formatTimer = (diff: number) => {
+      const h = Math.floor((diff % 86400000) / 3600000);
+      const m = Math.floor((diff % 3600000) / 60000);
+      const s = Math.floor((diff % 60000) / 1000);
+      return `${h}h ${m}m ${s}s`;
+  }
 
   const getProvider = () => {
     if ((sdk as any).wallet?.ethProvider) return (sdk as any).wallet.ethProvider;
@@ -96,11 +139,12 @@ function App() {
                 const client = createWalletClient({ chain: base, transport: custom(provider) });
                 const [addr] = await client.requestAddresses();
                 setAddress(addr);
+                checkGMStatus(addr);
             } catch (e) {}
         }
     };
     load();
-  }, []);
+  }, [checkGMStatus]);
 
   const handleConnect = async () => {
     const provider = getProvider();
@@ -110,7 +154,7 @@ function App() {
         await client.switchChain({ id: base.id }); 
         const [addr] = await client.requestAddresses();
         setAddress(addr);
-        setSelectedChainId(base.id);
+        checkGMStatus(addr);
     } catch (e: any) {
         setErrorMsg("Failed to connect: " + e.message);
     }
@@ -122,13 +166,51 @@ function App() {
     setTimeout(() => setHasFollowed(true), 1000); 
   }, []);
 
-  const executeClaim = async (targetChainId: number) => {
+  const executeGM = async () => {
     if (!address) return;
-    setSelectedChainId(targetChainId);
+    setIsLoading(true);
+    setErrorMsg(null);
+    setTxHash(null);
+
+    try {
+        const provider = getProvider();
+        const walletClient = createWalletClient({ chain: base, transport: custom(provider!) });
+        await walletClient.switchChain({ id: base.id });
+        const publicClient = createPublicClient({ chain: base, transport: http() });
+
+        const { request } = await publicClient.simulateContract({
+            account: address as `0x${string}`,
+            address: YOUR_OWN_GM_CONTRACT_ADDRESS as `0x${string}`,
+            abi: YOUR_GM_ABI,
+            functionName: 'gm',
+            args: []
+        });
+
+        const hash = await walletClient.writeContract(request);
+        setTxHash(hash);
+        await publicClient.waitForTransactionReceipt({ hash });
+
+        setHasGMed(true);
+        alert("GM Successful! Claims unlocked.");
+
+    } catch (err: any) {
+        if (err.message.includes("Already GMed today")) {
+            setErrorMsg("You have already GM'ed today!");
+            setHasGMed(true);
+        } else {
+            setErrorMsg(err.message || "GM Transaction failed");
+        }
+    } finally {
+        setIsLoading(false);
+    }
+  };
+
+  const executeClaim = async (claimType: 'main' | 'bonus') => {
+    if (!address) return;
+    if (!hasGMed) { setErrorMsg("Please GM on-chain first!"); return; }
+
     setIsLoading(true);
     setTxHash(null); setErrorMsg(null);
-
-    const targetConfig = CHAIN_CONFIG[targetChainId];
 
     try {
         const userFid = context?.user?.fid;
@@ -139,7 +221,7 @@ function App() {
             body: JSON.stringify({ 
                 userAddress: address, 
                 fid: userFid,
-                chainId: targetChainId
+                claimType: claimType
             })
         });
 
@@ -147,27 +229,24 @@ function App() {
 
         if (!data.success) {
             if (data.error?.toLowerCase().includes("already claimed")) {
-               setNextClaimTime(calculateNextReset());
-               throw new Error(`Already claimed on ${targetConfig.name} today!`);
+               if (claimType === 'main') setNextMainClaimTime(calculateNextReset());
+               else setNextBonusClaimTime(calculateNextReset());
+
+               const typeMsg = claimType === 'bonus' ? 'Bonus' : 'Main';
+               throw new Error(`Already claimed the ${typeMsg} reward today!`);
             }
             throw new Error(data.error || "Error");
         }
 
         const provider = getProvider();
-        const walletClient = createWalletClient({ chain: targetConfig.chainDef, transport: custom(provider!) });
-        
-        try {
-            await walletClient.switchChain({ id: targetChainId });
-        } catch (switchError: any) {
-             throw new Error(`Please switch your wallet network to ${targetConfig.name}.`);
-        }
-        
-        const publicClient = createPublicClient({ chain: targetConfig.chainDef, transport: http() });
+        const walletClient = createWalletClient({ chain: base, transport: custom(provider!) });
+        await walletClient.switchChain({ id: base.id });
+        const publicClient = createPublicClient({ chain: base, transport: http() });
 
         const { request } = await publicClient.simulateContract({
             account: address as `0x${string}`,
-            address: targetConfig.address as `0x${string}`,
-            abi: ABI,
+            address: DEGEN_TOKEN_ADDRESS as `0x${string}`,
+            abi: CLAIM_ABI,
             functionName: 'claim',
             args: [BigInt(data.amount), BigInt(data.nonce), data.signature]
         });
@@ -177,9 +256,11 @@ function App() {
         
         await publicClient.waitForTransactionReceipt({ hash });
         
-        alert(`Success! ${targetConfig.amountDisplay} ${targetConfig.token} Sent on ${targetConfig.name}.`);
+        const amountDisplay = claimType === 'bonus' ? '2' : '10';
+        alert(`Success! ${amountDisplay} DEGEN Sent.`);
         
-        setNextClaimTime(calculateNextReset());
+        if (claimType === 'main') setNextMainClaimTime(calculateNextReset());
+        else setNextBonusClaimTime(calculateNextReset());
 
     } catch (err: any) {
         setErrorMsg(err.message || "Transaction failed");
@@ -189,7 +270,7 @@ function App() {
   };
 
   const handleWarpcastShare = useCallback(() => {
-    const text = encodeURIComponent(`Claiming my daily crypto across Base and Arbitrum! 🚀\n\nMade by @0xpocky. Try it here 👇`);
+    const text = encodeURIComponent(`Just GM'ed and claimed my daily DEGEN rewards! 🎩\n\nMade by @0xpocky. Try it here 👇`);
     const embedUrl = encodeURIComponent(window.location.href); 
     sdk.actions.openUrl(`https://warpcast.com/~/compose?text=${text}&embeds[]=${embedUrl}`);
   }, []);
@@ -198,25 +279,31 @@ function App() {
     try { await sdk.actions.addFrame(); setAdded(true); } catch (e) {}
   }, []);
 
-  const ClaimButton = ({ chainId, Icon }: { chainId: number, Icon: React.ElementType }) => {
-      const config = CHAIN_CONFIG[chainId];
-      
-      const isActiveChain = selectedChainId === chainId;
-      const showTimer = isActiveChain && nextClaimTime;
-      const showLoading = isActiveChain && isLoading;
+  const ClaimButton = ({ type, amount, Icon, timer, timerDisplay, hasGMed }: { type: 'main' | 'bonus', amount: string, Icon: React.ElementType, timer: number | null, timerDisplay: string, hasGMed: boolean }) => {
+      const isBonus = type === 'bonus';
+      const bgColorStr = isBonus ? 'bg-purple-600 hover:bg-purple-500' : 'bg-blue-600 hover:bg-blue-500';
+      const labelStr = isBonus ? `Claim Bonus ${amount} DEGEN` : `Claim ${amount} DEGEN`;
 
-      if (showTimer) {
+      if (!hasGMed) {
           return (
-              <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed">
-                  <Clock className="w-5 h-5" /><span>Next {config.token}: {timerDisplay}</span>
+              <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-700/50 text-gray-400 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed mb-3 border border-gray-600/30">
+                  <Lock className="w-5 h-5" /><span>GM On-Chain First</span>
+              </button>
+          );
+      }
+
+      if (timer) {
+          return (
+              <button disabled className="w-full flex items-center justify-center gap-2 bg-gray-600 text-gray-300 font-bold py-3 px-6 rounded-xl shadow-inner cursor-not-allowed mb-3">
+                  <Clock className="w-5 h-5" /><span>Next: {timerDisplay}</span>
               </button>
           );
       }
 
       return (
-          <button onClick={() => executeClaim(chainId)} disabled={isLoading} className={`w-full group flex items-center justify-center gap-2 font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 hover:scale-[1.02] ${chainId === base.id ? 'bg-blue-600 hover:bg-blue-500' : 'bg-pink-600 hover:bg-pink-500'}`}>
-              {showLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Icon className="w-5 h-5" />}
-              <span>Claim {config.amountDisplay} {config.token}</span>
+          <button onClick={() => executeClaim(type)} disabled={isLoading} className={`w-full group flex items-center justify-center gap-2 font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 hover:scale-[1.02] mb-3 ${bgColorStr}`}>
+              {isLoading ? <Loader2 className="w-5 h-5 animate-spin" /> : <Icon className="w-5 h-5" />}
+              <span>{labelStr}</span>
           </button>
       );
   };
@@ -241,7 +328,7 @@ function App() {
       <div className="relative z-10 mx-4">
         <div className="bg-white/10 backdrop-blur-lg border border-white/20 p-8 rounded-3xl shadow-2xl max-w-sm w-full text-center transform transition-all duration-300 hover:scale-[1.02]">
           <div className="flex justify-center mb-6"><Gift className="w-24 h-24 text-yellow-400 animate-bounce drop-shadow-lg" /></div>
-          <h1 className="font-['Mountains_of_Christmas'] text-5xl mb-4 text-yellow-400 drop-shadow-md font-bold tracking-wide">Multi-Chain Xmas</h1>
+          <h1 className="font-['Mountains_of_Christmas'] text-5xl mb-4 text-yellow-400 drop-shadow-md font-bold tracking-wide">DEGEN Xmas</h1>
           <p className="text-xl font-semibold mb-6 tracking-wide">{context?.user?.username ? `Hi @${context.user.username}!` : ''}</p>
           
           {errorMsg && <div className="mb-4 p-2 bg-red-500/50 rounded-lg text-sm text-white font-medium animate-pulse break-words">{errorMsg}</div>}
@@ -257,19 +344,26 @@ function App() {
               </button>
             ) : (
               <>
-                <ClaimButton chainId={base.id} Icon={Coins} />
-                <ClaimButton chainId={arbitrum.id} Icon={Star} />
+                {isGMLoading ? (
+                    <div className="flex justify-center py-4 mb-3"><Loader2 className="w-8 h-8 animate-spin text-white/70" /></div>
+                ) : !hasGMed ? (
+                    <button onClick={executeGM} disabled={isLoading} className="w-full group flex items-center justify-center gap-2 bg-green-600 hover:bg-green-500 text-white font-bold py-3 px-6 rounded-xl shadow-lg transition-all duration-200 animate-bounce mb-3">
+                        <Coffee className="w-5 h-5" /><span>GM On-Chain to Unlock</span>
+                    </button>
+                ) : (
+                    <div className="text-green-400 font-bold mb-4 flex items-center justify-center gap-2 bg-green-900/30 py-2 rounded-lg border border-green-500/30">
+                        <Coffee className="w-5 h-5" /> GM'ed Today! Claims Unlocked.
+                    </div>
+                )}
+
+                <ClaimButton type="main" amount="10" Icon={Coins} timer={nextMainClaimTime} timerDisplay={mainTimerDisplay} hasGMed={hasGMed} />
+                <ClaimButton type="bonus" amount="2" Icon={Sparkles} timer={nextBonusClaimTime} timerDisplay={bonusTimerDisplay} hasGMed={hasGMed} />
               </>
             )}
 
             {txHash && (
-                <a 
-                    href={selectedChainId === base.id ? `https://basescan.org/tx/${txHash}` : `https://arbiscan.io/tx/${txHash}`} 
-                    target="_blank" 
-                    rel="noreferrer" 
-                    className="text-xs text-blue-300 underline mb-2"
-                >
-                    View Transaction on {activeChainConfig.name} Scan
+                <a href={`https://basescan.org/tx/${txHash}`} target="_blank" rel="noreferrer" className="text-xs text-blue-300 underline mb-2 block">
+                    View Transaction on Basescan
                 </a>
             )}
 
