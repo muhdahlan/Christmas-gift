@@ -14,5 +14,7 @@
     "splashImageUrl": "https://christmas-gift-seven.vercel.app/splash.png",
     "splashBackgroundColor": "#8b0000",
     "webhookUrl": "https://christmas-gift-seven.vercel.app/api/webhook"
-  }
+  },
+  "primaryCategory": "utility",
+  "tags": ["daily", "gift", "crypto", "base", "rewards"]
 }
