@@ -50,7 +50,7 @@ export async function POST(request: Request) {
     const currentUTCDay = Math.floor(now / 1000 / 86400);
     const lastGMDayBigInt = await publicClient.readContract({
         address: GM_CONTRACT_ADDRESS as `0x${string}`,
-        abi: GM_READ_ABI,
+        abi: GM_READ_ABI as any, 
         functionName: 'lastGMDay',
         args: [userAddress as `0x${string}`]
     });
