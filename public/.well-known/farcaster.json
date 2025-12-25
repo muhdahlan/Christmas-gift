@@ -1,20 +1,29 @@
 {
-  "accountAssociation": {
-    "header": "eyJmaWQiOjI0Mjg0NywidHlwZSI6ImN1c3RvZHkiLCJrZXkiOiIweDgyZDBmNzIwNTk0QjNmRGUwNTA1QTcxZTMxZDVlZDE5NDNDNmI1NmUifQ",
-    "payload": "eyJkb21haW4iOiJjaHJpc3RtYXMtZ2lmdC1zZXZlbi52ZXJjZWwuYXBwIn0",
-    "signature": "myGjL88udZVxRmOQ5cb/26T0D4jTRMu7+7nYuzeaLckA5c8pHLwC8KKtx7JYBcOqcGpVhVehsD7KlN8goUoYshw="
-  },
   "frame": {
-    "version": "1",
     "name": "Christmas Gift",
+    "version": "1",
     "iconUrl": "https://christmas-gift-seven.vercel.app/icon.png",
     "homeUrl": "https://christmas-gift-seven.vercel.app",
-    "imageUrl": "https://christmas-gift-seven.vercel.app/og-image.png",
+    "imageUrl": "https://christmas-gift-seven.vercel.app/image.png",
     "buttonTitle": "Open Gift 🎁",
     "splashImageUrl": "https://christmas-gift-seven.vercel.app/splash.png",
     "splashBackgroundColor": "#8b0000",
-    "webhookUrl": "https://christmas-gift-seven.vercel.app/api/webhook"
+    "webhookUrl": "https://christmas-gift-seven.vercel.app/api/webhook",
+    "subtitle": "Daily DEGEN Rewards",
+    "description": "Open your festive gift box daily to claim DEGEN tokens directly on the Base network. A simple and fun way to earn rewards every day!",
+    "primaryCategory": "finance",
+    "tags": [
+      "degen",
+      "crypto",
+      "rewards",
+      "daily"
+    ],
+    "heroImageUrl": "https://christmas-gift-seven.vercel.app/purple-splash.png",
+    "castShareUrl": "https://christmas-gift-seven.vercel.app/"
   },
-  "primaryCategory": "utility",
-  "tags": ["daily", "gift", "crypto", "base", "rewards"]
+  "accountAssociation": {
+    "header": "eyJmaWQiOjI0Mjg0NywidHlwZSI6ImF1dGgiLCJrZXkiOiIweGJiMjVjQzVkNWJjNjE4MzA5NGQ2OTM4ZUZiMEZlYmQyMEQ3NGRCYUEifQ",
+    "payload": "eyJkb21haW4iOiJjaHJpc3RtYXMtZ2lmdC1zZXZlbi52ZXJjZWwuYXBwIn0",
+    "signature": "MAFacERXj46ve8MzmVX8cGaUGl1SlhvT8wzAcRnPeJ059C/H1+Kl2iPM+qgb/28pgd+UjnSzGy/A94pQktIqeBs="
+  }
 }
