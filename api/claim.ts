@@ -2,8 +2,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 import { kv } from '@vercel/kv';
-import path from 'path';
-import { promises as fs } from 'fs';
+import blacklistedFIDs from '../config/blacklist';
 
 const GM_CONTRACT_ADDRESS = "0x8fDc3AED01a0b12c00D480977ad16a16A87cb9E7";
 const GM_READ_ABI = [{
@@ -36,10 +35,6 @@ export async function POST(request: Request) {
     if (!userAddress || !SIGNER_PRIVATE_KEY) {
       return new Response(JSON.stringify({ error: 'Invalid Request Config' }), { status: 400 });
     }
-
-    const configDirectory = path.join(process.cwd(), 'config');
-    const fileContents = await fs.readFile(path.join(configDirectory, 'blacklist.json'), 'utf8');
-    const blacklistedFIDs: number[] = JSON.parse(fileContents);
 
     if (rawFid) {
         const fidNumber = Number(rawFid);
