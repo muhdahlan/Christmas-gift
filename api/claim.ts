@@ -2,7 +2,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 import { kv } from '@vercel/kv';
-import blacklistedFIDs from '@config/blacklist';
+import blacklistedFIDs from '../config/blacklist.js';
 
 const GM_CONTRACT_ADDRESS = "0x8fDc3AED01a0b12c00D480977ad16a16A87cb9E7";
 const GM_READ_ABI = [{
