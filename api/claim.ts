@@ -2,7 +2,8 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 import { kv } from '@vercel/kv';
-import blacklistedFIDs from '../config/blacklist.json';
+
+const blacklistedFIDs = require('../config/blacklist.json');
 
 const GM_CONTRACT_ADDRESS = "0x8fDc3AED01a0b12c00D480977ad16a16A87cb9E7";
 const GM_READ_ABI = [{
@@ -39,7 +40,7 @@ export async function POST(request: Request) {
     if (rawFid) {
         const fidNumber = Number(rawFid);
 
-        if (!isNaN(fidNumber) && blacklistedFIDs.includes(fidNumber)) {
+        if (!isNaN(fidNumber) && Array.isArray(blacklistedFIDs) && blacklistedFIDs.includes(fidNumber)) {
             console.warn(`[SECURITY BLOCK] Claim attempt from blacklisted FID: ${fidNumber}, Address: ${userAddress}`);
 
             return new Response(JSON.stringify({
