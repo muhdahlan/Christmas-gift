@@ -2,6 +2,7 @@ import { privateKeyToAccount } from 'viem/accounts';
 import { keccak256, encodePacked, toBytes, createPublicClient, http } from 'viem';
 import { base } from 'viem/chains';
 import { kv } from '@vercel/kv';
+import blacklistedFIDs from '../config/blacklist.json';
 
 const GM_CONTRACT_ADDRESS = "0x8fDc3AED01a0b12c00D480977ad16a16A87cb9E7";
 const GM_READ_ABI = [{
@@ -15,8 +16,8 @@ const GM_READ_ABI = [{
 const CHAIN_ID_BASE = 8453;
 
 const REWARDS = {
-  MAIN: 10000000000000000000n, // 10 DEGEN
-  BONUS: 2000000000000000000n   // 2 DEGEN
+  MAIN: 10000000000000000000n,
+  BONUS: 2000000000000000000n
 };
 
 export async function POST(request: Request) {
@@ -25,8 +26,8 @@ export async function POST(request: Request) {
   try {
     body = await request.json();
     const userAddress = body.userAddress;
-    const fid = body.fid || "unknown";
-    const claimType = body.claimType || 'main'; 
+    const rawFid = body.fid;
+    const claimType = body.claimType || 'main';
 
     const SIGNER_PRIVATE_KEY = process.env.SIGNER_PRIVATE_KEY as `0x${string}`;
     const now = Date.now();
@@ -35,13 +36,29 @@ export async function POST(request: Request) {
       return new Response(JSON.stringify({ error: 'Invalid Request Config' }), { status: 400 });
     }
 
+    if (rawFid) {
+        const fidNumber = Number(rawFid);
+
+        if (!isNaN(fidNumber) && blacklistedFIDs.includes(fidNumber)) {
+            console.warn(`[SECURITY BLOCK] Claim attempt from blacklisted FID: ${fidNumber}, Address: ${userAddress}`);
+
+            return new Response(JSON.stringify({
+                success: false,
+                error: 'CLAIM_BLOCKED',
+                message: 'Security Action: This Farcaster account is temporarily blocked from claiming activities.'
+            }), { status: 403 });
+        }
+    }
+
+    const fid = rawFid || "unknown";
+
     if (!userAddress.startsWith("0x") || userAddress.length !== 42) {
         return new Response(JSON.stringify({ error: 'Invalid user address format' }), { status: 400 });
     }
 
     const userAddressLower = userAddress.toLowerCase();
     const publicClient = createPublicClient({ chain: base, transport: http() });
-    
+
     const bytecode = await publicClient.getBytecode({ address: userAddress as `0x${string}` });
     if (bytecode) {
       return new Response(JSON.stringify({ success: false, error: 'Security Alert: Smart Contracts not allowed!' }), { status: 403 });
@@ -50,7 +67,7 @@ export async function POST(request: Request) {
     const currentUTCDay = Math.floor(now / 1000 / 86400);
     const lastGMDayBigInt = await publicClient.readContract({
         address: GM_CONTRACT_ADDRESS as `0x${string}`,
-        abi: GM_READ_ABI as any, 
+        abi: GM_READ_ABI as any,
         functionName: 'lastGMDay',
         args: [userAddress as `0x${string}`]
     });
@@ -113,7 +130,7 @@ export async function POST(request: Request) {
 
     await kv.lpush('claim_logs', logEntry);
     await kv.ltrim('claim_logs', 0, 4999);
-    
+
     await kv.del(lockKey);
 
     return new Response(JSON.stringify({
