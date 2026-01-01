@@ -42,6 +42,7 @@ function App() {
   const [added, setAdded] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
   const [hasFollowed, setHasFollowed] = useState(false);
+  const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   
   const [isLoading, setIsLoading] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -128,11 +129,13 @@ function App() {
   };
 
   useEffect(() => {
-    sdk.actions.ready();
     const load = async () => {
         const context = await sdk.context;
         setContext(context);
+        sdk.actions.ready();
+
         if (context?.client?.added) setAdded(true);
+        
         const provider = getProvider();
         if (provider) {
             try {
@@ -140,11 +143,17 @@ function App() {
                 const [addr] = await client.requestAddresses();
                 setAddress(addr);
                 checkGMStatus(addr);
-            } catch (e) {}
+            } catch (e) {
+                console.error("Auto connect error", e);
+            }
         }
     };
-    load();
-  }, [checkGMStatus]);
+
+    if (sdk && !isSDKLoaded) {
+        setIsSDKLoaded(true);
+        load();
+    }
+  }, [isSDKLoaded, checkGMStatus]);
 
   const handleConnect = async () => {
     const provider = getProvider();
