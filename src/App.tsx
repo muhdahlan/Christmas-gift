@@ -42,7 +42,6 @@ function App() {
   const [added, setAdded] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
   const [hasFollowed, setHasFollowed] = useState(false);
-  const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   
   const [isLoading, setIsLoading] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -57,6 +56,28 @@ function App() {
   const [bonusTimerDisplay, setBonusTimerDisplay] = useState<string>("");
 
   const getCurrentUTCDay = () => Math.floor(Date.now() / 1000 / 86400);
+
+  // 1. Force Ready Signal Implementation
+  // Separated to ensure it runs regardless of data loading success/failure
+  useEffect(() => {
+    const triggerReady = () => {
+        try {
+            sdk.actions.ready();
+        } catch (error) {
+            console.error("SDK Ready Error:", error);
+        }
+    };
+
+    // Attempt 1: Immediate
+    triggerReady();
+
+    // Attempt 2: Delayed (Safe guard for race conditions)
+    const timer = setTimeout(() => {
+        triggerReady();
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, []);
 
   const checkGMStatus = useCallback(async (userAddr: string) => {
     setIsGMLoading(true);
@@ -128,19 +149,20 @@ function App() {
     return null;
   };
 
+  // 2. Data Loading Implementation
   useEffect(() => {
-    const load = async () => {
-        // Priority: Signal ready immediately to prevent "Not Ready" timeout
-        sdk.actions.ready();
-
+    const loadData = async () => {
         try {
             const context = await sdk.context;
             setContext(context);
             if (context?.client?.added) setAdded(true);
-        } catch (err) {
-            console.error("Error loading context:", err);
+            
+            // Backup ready call after context load
+            sdk.actions.ready();
+        } catch (e) {
+            console.error("Context load failed", e);
         }
-        
+
         const provider = getProvider();
         if (provider) {
             try {
@@ -153,12 +175,8 @@ function App() {
             }
         }
     };
-
-    if (sdk && !isSDKLoaded) {
-        setIsSDKLoaded(true);
-        load();
-    }
-  }, [isSDKLoaded, checkGMStatus]);
+    loadData();
+  }, [checkGMStatus]);
 
   const handleConnect = async () => {
     const provider = getProvider();
