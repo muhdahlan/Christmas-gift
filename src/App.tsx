@@ -42,6 +42,7 @@ function App() {
   const [added, setAdded] = useState(false);
   const [address, setAddress] = useState<string | null>(null);
   const [hasFollowed, setHasFollowed] = useState(false);
+  const [isSDKLoaded, setIsSDKLoaded] = useState(false);
   
   const [isLoading, setIsLoading] = useState(false);
   const [txHash, setTxHash] = useState<string | null>(null);
@@ -56,28 +57,6 @@ function App() {
   const [bonusTimerDisplay, setBonusTimerDisplay] = useState<string>("");
 
   const getCurrentUTCDay = () => Math.floor(Date.now() / 1000 / 86400);
-
-  // 1. Force Ready Signal Implementation
-  // Separated to ensure it runs regardless of data loading success/failure
-  useEffect(() => {
-    const triggerReady = () => {
-        try {
-            sdk.actions.ready();
-        } catch (error) {
-            console.error("SDK Ready Error:", error);
-        }
-    };
-
-    // Attempt 1: Immediate
-    triggerReady();
-
-    // Attempt 2: Delayed (Safe guard for race conditions)
-    const timer = setTimeout(() => {
-        triggerReady();
-    }, 500);
-
-    return () => clearTimeout(timer);
-  }, []);
 
   const checkGMStatus = useCallback(async (userAddr: string) => {
     setIsGMLoading(true);
@@ -102,6 +81,46 @@ function App() {
         setIsGMLoading(false);
     }
   }, []);
+
+  const getProvider = () => {
+    if ((sdk as any).wallet?.ethProvider) return (sdk as any).wallet.ethProvider;
+    if (typeof window !== 'undefined' && (window as any).ethereum) return (window as any).ethereum;
+    return null;
+  };
+
+  useEffect(() => {
+    const load = async () => {
+        // 1. Signal Ready immediately to clear splash screen
+        sdk.actions.ready();
+
+        // 2. Load Context
+        try {
+            const context = await sdk.context;
+            setContext(context);
+            if (context?.client?.added) setAdded(true);
+        } catch (err) {
+            console.error("Context load error:", err);
+        }
+
+        // 3. Auto-Connect Wallet if available
+        const provider = getProvider();
+        if (provider) {
+            try {
+                const client = createWalletClient({ chain: base, transport: custom(provider) });
+                const [addr] = await client.requestAddresses();
+                setAddress(addr);
+                checkGMStatus(addr);
+            } catch (e) {
+                console.error("Auto connect error", e);
+            }
+        }
+    };
+
+    if (sdk && !isSDKLoaded) {
+        setIsSDKLoaded(true);
+        load();
+    }
+  }, [isSDKLoaded, checkGMStatus]);
 
   useEffect(() => {
     const checkFollow = localStorage.getItem("hasFollowedDev");
@@ -142,41 +161,6 @@ function App() {
       const s = Math.floor((diff % 60000) / 1000);
       return `${h}h ${m}m ${s}s`;
   }
-
-  const getProvider = () => {
-    if ((sdk as any).wallet?.ethProvider) return (sdk as any).wallet.ethProvider;
-    if (typeof window !== 'undefined' && (window as any).ethereum) return (window as any).ethereum;
-    return null;
-  };
-
-  // 2. Data Loading Implementation
-  useEffect(() => {
-    const loadData = async () => {
-        try {
-            const context = await sdk.context;
-            setContext(context);
-            if (context?.client?.added) setAdded(true);
-            
-            // Backup ready call after context load
-            sdk.actions.ready();
-        } catch (e) {
-            console.error("Context load failed", e);
-        }
-
-        const provider = getProvider();
-        if (provider) {
-            try {
-                const client = createWalletClient({ chain: base, transport: custom(provider) });
-                const [addr] = await client.requestAddresses();
-                setAddress(addr);
-                checkGMStatus(addr);
-            } catch (e) {
-                console.error("Auto connect error", e);
-            }
-        }
-    };
-    loadData();
-  }, [checkGMStatus]);
 
   const handleConnect = async () => {
     const provider = getProvider();
@@ -308,7 +292,16 @@ function App() {
   }, []);
 
   const handleAddApp = useCallback(async () => {
-    try { await sdk.actions.addFrame(); setAdded(true); } catch (e) {}
+    try { 
+        const result = await sdk.actions.addFrame();
+        if (result && (result as any).added) {
+            setAdded(true);
+        }
+    } catch (e: any) {
+        const errorText = e.message || JSON.stringify(e);
+        setErrorMsg(`Failed to add app: ${errorText}`);
+        alert(`Failed to add app: ${errorText}`);
+    }
   }, []);
 
   const ClaimButton = ({ type, amount, Icon, timer, timerDisplay, hasGMed }: { type: 'main' | 'bonus', amount: string, Icon: React.ElementType, timer: number | null, timerDisplay: string, hasGMed: boolean }) => {
