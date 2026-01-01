@@ -130,11 +130,16 @@ function App() {
 
   useEffect(() => {
     const load = async () => {
-        const context = await sdk.context;
-        setContext(context);
+        // Priority: Signal ready immediately to prevent "Not Ready" timeout
         sdk.actions.ready();
 
-        if (context?.client?.added) setAdded(true);
+        try {
+            const context = await sdk.context;
+            setContext(context);
+            if (context?.client?.added) setAdded(true);
+        } catch (err) {
+            console.error("Error loading context:", err);
+        }
         
         const provider = getProvider();
         if (provider) {
